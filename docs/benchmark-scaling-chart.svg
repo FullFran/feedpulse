@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="550" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1a1a2e"/>
+      <stop offset="100%" stop-color="#16213e"/>
+    </linearGradient>
+  </defs>
+  <rect width="900" height="550" fill="url(#bgGrad)"/>
+  
+  <!-- Title -->
+  <text x="450" y="25" text-anchor="middle" fill="#00d9ff" font-size="18" font-weight="bold">RSS Monitor Benchmark Scaling Analysis</text>
+  <text x="450" y="42" text-anchor="middle" fill="#888888" font-size="12">4 stages: 100, 1000, 5000, 10000 feeds | Total time O(n^0.55)</text>
+  
+  <!-- Chart area bg -->
+  <rect x="70" y="40" width="800" height="450" fill="rgba(255,255,255,0.03)"/>
+  
+  <!-- Grid lines -->
+  <line x1="70" y1="490" x2="870" y2="490" stroke="rgba(255,255,255,0.08)" stroke-width="1"/><line x1="70" y1="415" x2="870" y2="415" stroke="rgba(255,255,255,0.08)" stroke-width="1"/><line x1="70" y1="340" x2="870" y2="340" stroke="rgba(255,255,255,0.08)" stroke-width="1"/><line x1="70" y1="265" x2="870" y2="265" stroke="rgba(255,255,255,0.08)" stroke-width="1"/><line x1="70" y1="190" x2="870" y2="190" stroke="rgba(255,255,255,0.08)" stroke-width="1"/><line x1="70" y1="115" x2="870" y2="115" stroke="rgba(255,255,255,0.08)" stroke-width="1"/><line x1="70" y1="40" x2="870" y2="40" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  
+  <!-- Y axis labels -->
+  <text x="62" y="494" text-anchor="end" fill="#888888" font-size="11">0</text><text x="62" y="419" text-anchor="end" fill="#888888" font-size="11">10k</text><text x="62" y="344" text-anchor="end" fill="#888888" font-size="11">20k</text><text x="62" y="269" text-anchor="end" fill="#888888" font-size="11">30k</text><text x="62" y="194" text-anchor="end" fill="#888888" font-size="11">40k</text><text x="62" y="119" text-anchor="end" fill="#888888" font-size="11">50k</text><text x="62" y="44" text-anchor="end" fill="#888888" font-size="11">60k</text>
+  
+  <!-- X axis labels -->
+  <text x="70" y="510" text-anchor="middle" fill="#888888" font-size="11">100</text><text x="470" y="510" text-anchor="middle" fill="#888888" font-size="11">1k</text><text x="749.5880017344075" y="510" text-anchor="middle" fill="#888888" font-size="11">5k</text><text x="870" y="510" text-anchor="middle" fill="#888888" font-size="11">10k</text>
+  
+  <!-- X axis title -->
+  <text x="450" y="542" text-anchor="middle" fill="#00d9ff" font-size="12">Number of Feeds (log scale)</text>
+  
+  <!-- Y axis title -->
+  <text x="18" y="265" text-anchor="middle" fill="#00d9ff" font-size="12" transform="rotate(-90,18,265)">Duration (ms)</text>
+  
+  <!-- Lines -->
+  <path d="M70.0,473.8L470.0,88.6L749.6,406.1L870.0,58.9" fill="none" stroke="#00d9ff" stroke-width="3" stroke-linejoin="round"/><path d="M70.0,474.9L470.0,459.8L749.6,429.6L870.0,353.7" fill="none" stroke="#e94560" stroke-width="2" stroke-linejoin="round"/><path d="M70.0,489.3L470.0,122.2L749.6,477.8L870.0,218.6" fill="none" stroke="#ffc107" stroke-width="2" stroke-linejoin="round"/><path d="M70.0,489.6L470.0,486.5L749.6,478.7L870.0,466.5" fill="none" stroke="#28a745" stroke-width="2" stroke-linejoin="round"/>
+  
+  <!-- Points -->
+  <circle cx="70" cy="473.755" r="5" fill="#00d9ff" stroke="white" stroke-width="1.5"/><circle cx="470" cy="88.555" r="5" fill="#00d9ff" stroke="white" stroke-width="1.5"/><circle cx="749.5880017344075" cy="406.14250000000004" r="5" fill="#00d9ff" stroke="white" stroke-width="1.5"/><circle cx="870" cy="58.86250000000001" r="5" fill="#00d9ff" stroke="white" stroke-width="1.5"/><circle cx="70" cy="474.8875" r="5" fill="#e94560" stroke="white" stroke-width="1.5"/><circle cx="470" cy="459.82" r="5" fill="#e94560" stroke="white" stroke-width="1.5"/><circle cx="749.5880017344075" cy="429.64" r="5" fill="#e94560" stroke="white" stroke-width="1.5"/><circle cx="870" cy="353.7475" r="5" fill="#e94560" stroke="white" stroke-width="1.5"/><circle cx="70" cy="489.3175" r="5" fill="#ffc107" stroke="white" stroke-width="1.5"/><circle cx="470" cy="122.21499999999997" r="5" fill="#ffc107" stroke="white" stroke-width="1.5"/><circle cx="749.5880017344075" cy="477.76" r="5" fill="#ffc107" stroke="white" stroke-width="1.5"/><circle cx="870" cy="218.635" r="5" fill="#ffc107" stroke="white" stroke-width="1.5"/><circle cx="70" cy="489.55" r="5" fill="#28a745" stroke="white" stroke-width="1.5"/><circle cx="470" cy="486.52" r="5" fill="#28a745" stroke="white" stroke-width="1.5"/><circle cx="749.5880017344075" cy="478.7425" r="5" fill="#28a745" stroke="white" stroke-width="1.5"/><circle cx="870" cy="466.48" r="5" fill="#28a745" stroke="white" stroke-width="1.5"/>
+  
+  <!-- Legend -->
+  <rect x="80" y="40" width="12" height="12" fill="#00d9ff" rx="2"/>
+        <text x="96" y="50" fill="white" font-size="11">Total Duration</text><rect x="200" y="40" width="12" height="12" fill="#e94560" rx="2"/>
+        <text x="216" y="50" fill="white" font-size="11">Processing</text><rect x="80" y="62" width="12" height="12" fill="#ffc107" rx="2"/>
+        <text x="96" y="72" fill="white" font-size="11">Seed</text><rect x="200" y="62" width="12" height="12" fill="#28a745" rx="2"/>
+        <text x="216" y="72" fill="white" font-size="11">Queue</text>
+  
+  <!-- Data table mini -->
+  <text x="70" y="480" fill="#00d9ff" font-size="11">ms/feed: 21.66 → 53.53 → 2.24 → 5.75</text>
+</svg>

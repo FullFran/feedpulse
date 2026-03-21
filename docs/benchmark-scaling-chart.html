@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RSS Monitor Benchmark Scaling Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eaeaea;
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 0.5rem;
+            font-size: 2rem;
+            color: #00d9ff;
+        }
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+        }
+        .legend-bar {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+            padding: 0.75rem 1.5rem;
+            background: rgba(255,255,255,0.04);
+            border-radius: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+            color: #ccc;
+        }
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .charts-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        .charts-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+        @media (max-width: 1100px) {
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+        }
+        .chart-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        .chart-title {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            color: #fff;
+            text-align: center;
+        }
+        .chart-subtitle {
+            font-size: 0.8rem;
+            color: #888;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        .chart-container {
+            position: relative;
+            height: 380px;
+        }
+        .insights {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .insights h2 {
+            color: #00d9ff;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+        .insights-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
+        }
+        .insight-item {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+            padding: 1rem;
+            border-left: 3px solid #00d9ff;
+        }
+        .insight-item.warning { border-left-color: #ffc107; }
+        .insight-item.danger  { border-left-color: #dc3545; }
+        .insight-item.success { border-left-color: #28a745; }
+        .insight-item.info    { border-left-color: #6f42c1; }
+        .insight-label {
+            font-size: 0.75rem;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 0.3rem;
+        }
+        .insight-value {
+            font-size: 1.05rem;
+            font-weight: 600;
+            color: #fff;
+        }
+        .metric-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+            font-size: 0.85rem;
+        }
+        .metric-table th, .metric-table td {
+            padding: 0.5rem 0.75rem;
+            text-align: right;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .metric-table th {
+            color: #00d9ff;
+            font-weight: 600;
+        }
+        .metric-table td:first-child,
+        .metric-table th:first-child { text-align: left; }
+        .metric-table tr:hover { background: rgba(0, 217, 255, 0.04); }
+        tr.region-cold td { color: #ffc107; }
+        tr.region-warm td { color: #00d9ff; }
+        tr.region-gc td   { color: #ff6b6b; font-style: italic; }
+        tr.region-steady  { background: rgba(40, 167, 69, 0.08); }
+        .region-badge {
+            display: inline-block;
+            padding: 0.1rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .badge-cold  { background: rgba(255,193,7,0.2);  color: #ffc107; }
+        .badge-warm  { background: rgba(0,217,255,0.15); color: #00d9ff; }
+        .badge-gc    { background: rgba(255,107,107,0.2); color: #ff6b6b; }
+        .badge-steady{ background: rgba(40,167,69,0.2);  color: #28a745; }
+        .scaling-indicator {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 700;
+        }
+        .scaling-sublinear  { background: #00d9ff; color: #000; }
+        .scaling-superlinear{ background: #dc3545; color: #fff; }
+        .scaling-linear     { background: #28a745; color: #fff; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 RSS Monitor — Progressive Scaling Benchmark</h1>
+        <p class="subtitle">100 → 50,000 feeds | Cold-start + Warm incremental + Steady-state re-fetch | Real RSS Benchmark (10,000 real feeds)</p>
+
+        <!-- Unified legend -->
+        <div class="legend-bar">
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#ffc107"></div> Seed
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#28a745"></div> Queue
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#e94560"></div> Processing
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#00d9ff; width:16px; height:16px; border:2px solid #fff;"></div> Total
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#ff6b6b; width:16px; height:16px; border:2px solid #fff;"></div> GC Spike
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#6f42c1; width:4px; height:20px; border-radius:2px;"></div> Steady-state ref
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:#ff9500; width:16px; height:16px; border:2px solid #fff; border-radius:3px;"></div> Real RSS Benchmark
+            </div>
+            <div class="legend-item" style="border-left:1px solid #555; padding-left:1rem;">
+                <div class="legend-dot" style="background:rgba(255,193,7,0.3); border:1px dashed #ffc107;"></div> Cold-start zone
+            </div>
+            <div class="legend-item">
+                <div class="legend-dot" style="background:rgba(0,217,255,0.3); border:1px dashed #00d9ff;"></div> Warm DB zone
+            </div>
+        </div>
+
+        <!-- Row 1: Linear + Log-Log -->
+        <div class="charts-row">
+            <div class="chart-card">
+                <h3 class="chart-title">Linear Scale — Total Duration vs Feeds</h3>
+                <p class="chart-subtitle">All stages stacked; cold-start vs warm DB regions highlighted</p>
+                <div class="chart-container">
+                    <canvas id="linearChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-card">
+                <h3 class="chart-title">Log-Log Scale — Power Law Behavior</h3>
+                <p class="chart-subtitle">Straight line = O(n^k); slope reveals scaling exponent</p>
+                <div class="chart-container">
+                    <canvas id="logLogChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: ms/feed efficiency (full width) -->
+        <div class="chart-card" style="max-width:900px; margin:0 auto 2rem;">
+            <h3 class="chart-title">ms/Feed Efficiency vs Total Feeds</h3>
+            <p class="chart-subtitle">Measures overhead per feed; lower is better. Steady-state baseline at 0.26 ms/feed.</p>
+            <div class="chart-container" style="height:320px;">
+                <canvas id="efficiencyChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Key Insights -->
+        <div class="insights">
+            <h2>🔍 Key Findings</h2>
+            <div class="insights-grid">
+                <div class="insight-item success">
+                    <div class="insight-label">Best Warm DB Efficiency</div>
+                    <div class="insight-value">4.51 ms/feed @ 40,000 feeds <span class="scaling-indicator scaling-sublinear">OPTIMAL</span></div>
+                </div>
+                <div class="insight-item warning">
+                    <div class="insight-label">GC Disruption</div>
+                    <div class="insight-value">25k (+3×) and 45k (+2×) spikes caused by Go GC pauses</div>
+                </div>
+                <div class="insight-item info">
+                    <div class="insight-label">Steady-State Re-fetch</div>
+                    <div class="insight-value">0.26 ms/feed (30,000 feeds) — near-floor efficiency</div>
+                </div>
+                <div class="insight-item danger">
+                    <div class="insight-label">Cold-Start Variance</div>
+                    <div class="insight-value">Seed phase wildly variable (91ms–49s) due to network I/O</div>
+                </div>
+                <div class="insight-item warning">
+                    <div class="insight-label">Real RSS Overhead</div>
+                    <div class="insight-value">18.03 ms/feed vs 5.75 fixture — <strong>3.1× slower</strong> due to real HTTP latency</div>
+                </div>
+                <div class="insight-item success">
+                    <div class="insight-label">Real Alert Generation</div>
+                    <div class="insight-value">6.7% match rate with "AI" keyword — 3,817 alerts from 57k entries</div>
+                </div>
+                <div class="insight-item">
+                    <div class="insight-label">Warm DB Scaling</div>
+                    <div class="insight-value"><span class="scaling-indicator scaling-sublinear">SUBLINEAR</span> 4–14 ms/feed (flat vs linear)</div>
+                </div>
+                <div class="insight-item">
+                    <div class="insight-label">Real Network Latency</div>
+                    <div class="insight-value">19–649ms range (avg 116ms) vs sub-ms fixture — <strong>primary bottleneck</strong></div>
+                </div>
+            </div>
+
+            <h3 style="margin-top:1.5rem; color:#00d9ff;">📋 Full Benchmark Data</h3>
+            <div style="overflow-x:auto;">
+            <table class="metric-table">
+                <thead>
+                    <tr>
+                        <th>Region</th>
+                        <th>Feeds</th>
+                        <th>Type</th>
+                        <th>Seed (ms)</th>
+                        <th>Queue (ms)</th>
+                        <th>Processing (ms)</th>
+                        <th>Total (ms)</th>
+                        <th>ms/feed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Cold-start -->
+                    <tr class="region-cold">
+                        <td><span class="region-badge badge-cold">COLD</span></td>
+                        <td>100</td>
+                        <td>seed</td>
+                        <td>91</td>
+                        <td>60</td>
+                        <td>2,015</td>
+                        <td>2,166</td>
+                        <td>21.66</td>
+                    </tr>
+                    <tr class="region-cold">
+                        <td><span class="region-badge badge-cold">COLD</span></td>
+                        <td>1,000</td>
+                        <td>seed</td>
+                        <td>49,038</td>
+                        <td>464</td>
+                        <td>4,024</td>
+                        <td>53,526</td>
+                        <td>53.53</td>
+                    </tr>
+                    <tr class="region-cold">
+                        <td><span class="region-badge badge-cold">COLD</span></td>
+                        <td>5,000</td>
+                        <td>seed</td>
+                        <td>1,632</td>
+                        <td>1,501</td>
+                        <td>8,048</td>
+                        <td>11,181</td>
+                        <td>2.24</td>
+                    </tr>
+                    <tr class="region-cold">
+                        <td><span class="region-badge badge-cold">COLD</span></td>
+                        <td>10,000</td>
+                        <td>seed</td>
+                        <td>36,182</td>
+                        <td>3,136</td>
+                        <td>18,167</td>
+                        <td>57,485</td>
+                        <td>5.75</td>
+                    </tr>
+                    <!-- Warm incremental -->
+                    <tr class="region-warm">
+                        <td><span class="region-badge badge-warm">WARM</span></td>
+                        <td>15,000</td>
+                        <td>+5,000</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>28,137</td>
+                        <td>5.63</td>
+                    </tr>
+                    <tr class="region-warm">
+                        <td><span class="region-badge badge-warm">WARM</span></td>
+                        <td>20,000</td>
+                        <td>+5,000</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>27,589</td>
+                        <td>5.52</td>
+                    </tr>
+                    <tr class="region-gc">
+                        <td><span class="region-badge badge-gc">GC</span></td>
+                        <td>25,000</td>
+                        <td>+5,000</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>68,336</td>
+                        <td>13.67</td>
+                    </tr>
+                    <tr class="region-warm">
+                        <td><span class="region-badge badge-warm">WARM</span></td>
+                        <td>30,000</td>
+                        <td>+5,000</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>27,589</td>
+                        <td>5.52</td>
+                    </tr>
+                    <tr class="region-warm">
+                        <td><span class="region-badge badge-warm">WARM</span></td>
+                        <td>35,000</td>
+                        <td>+5,000</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>37,633</td>
+                        <td>7.53</td>
+                    </tr>
+                    <tr class="region-warm">
+                        <td><span class="region-badge badge-warm">WARM</span></td>
+                        <td>40,000</td>
+                        <td>+5,000</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>22,568</td>
+                        <td>4.51</td>
+                    </tr>
+                    <tr class="region-gc">
+                        <td><span class="region-badge badge-gc">GC</span></td>
+                        <td>45,000</td>
+                        <td>+5,000</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>52,736</td>
+                        <td>10.55</td>
+                    </tr>
+                    <tr class="region-warm">
+                        <td><span class="region-badge badge-warm">WARM</span></td>
+                        <td>50,000</td>
+                        <td>+5,000</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>25,650</td>
+                        <td>5.13</td>
+                    </tr>
+                    <!-- Steady-state -->
+                    <tr class="region-steady" style="background:rgba(40,167,69,0.12);">
+                        <td><span class="region-badge badge-steady">STEADY</span></td>
+                        <td>30,000</td>
+                        <td>re-fetch</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>—</td>
+                        <td>7,800</td>
+                        <td style="color:#28a745; font-weight:700;">0.26</td>
+                    </tr>
+                    <!-- Real RSS Benchmark -->
+                    <tr style="background:rgba(255,149,0,0.08);">
+                        <td><span class="region-badge" style="background:rgba(255,149,0,0.25); color:#ff9500;">REAL RSS</span></td>
+                        <td>10,000</td>
+                        <td>real HTTP</td>
+                        <td>3,533</td>
+                        <td>—</td>
+                        <td>183,744</td>
+                        <td>187,277</td>
+                        <td style="color:#ff9500; font-weight:700;">18.03</td>
+                    </tr>
+                    <tr style="background:rgba(255,149,0,0.04); font-size:0.8rem;">
+                        <td colspan="2"><em>Real RSS details:</em></td>
+                        <td colspan="6"><em>6 sources (Google Blog, HN, TechCrunch, BBC, Ars Technica, The Verge) | 57,008 entries | 3,817 alerts (6.7%) | 5.4% error rate | avg latency 116ms | keyword: "AI"</em></td>
+                    </tr>
+                </tbody>
+            </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ─────────────────────────────────────────────────────────────
+        //  BENCHMARK DATA
+        // ─────────────────────────────────────────────────────────────
+        const coldStart = {
+            feeds:     [100,      1000,    5000,     10000],
+            seed:      [91,       49038,   1632,     36182],
+            queue:     [60,       464,     1501,     3136],
+            processing:[2015,     4024,    8048,     18167],
+            total:     [2166,     53526,   11181,    57485]
+        };
+
+        const warmIncremental = {
+            // labels = total feeds after each delta
+            labels:    ['15,000\n(+5k)', '20,000\n(+5k)', '25,000\n(+5k)', '30,000\n(+5k)',
+                        '35,000\n(+5k)', '40,000\n(+5k)', '45,000\n(+5k)', '50,000\n(+5k)'],
+            totalFeeds:[15000, 20000, 25000, 30000, 35000, 40000, 45000, 50000],
+            // delta adds (5k each), total time for the delta batch
+            deltaMs:   [28137, 27589, 68336, 27589, 37633, 22568, 52736, 25650],
+            msPerFeed: [5.63,  5.52,  13.67, 5.52,  7.53,  4.51,  10.55, 5.13]
+        };
+
+        const steadyState = {
+            feeds:     30000,
+            msPerFeed: 0.26
+        };
+
+        // Real RSS Benchmark Data (10,000 real feeds, 6 RSS sources)
+        // Run: 2026-03-21 | Sources: Google Blog, HN, TechCrunch, BBC, Ars Technica, The Verge
+        // Keywords: "AI" | Observation: 3 min window
+        // Results: 57k entries, 3.8k alerts (6.7% match rate), 5.4% error rate
+        // Network latency: 20-650ms (avg 116ms real vs sub-ms fixture)
+        const realRssBenchmark = {
+            feeds: 10000,
+            seedMs: 3533,
+            queueMs: 0,       // scheduler running in background, no explicit queue phase
+            processingMs: 183744, // observation window ms (includes ongoing processing)
+            totalMs: 187277,  // seed + observation (full end-to-end time for this run)
+            msPerFeed: 18.03,
+            entries: 57008,
+            alerts: 3817,
+            alertRate: '6.70%',
+            errorRate: '5.40%',
+            networkLatency: { avg: 116, min: 19, max: 649, p95: 595 },
+            sources: ['google-blog', 'hn-frontpage', 'techcrunch', 'bbc-news', 'arstechnica', 'theverge'],
+        };
+
+        // Combine all feeds for x-axis
+        const allFeeds = [...coldStart.feeds, ...warmIncremental.totalFeeds, realRssBenchmark.feeds];
+        const allMsPerFeed = [
+            ...coldStart.total.map((t, i) => t / coldStart.feeds[i]),
+            ...warmIncremental.msPerFeed,
+            realRssBenchmark.msPerFeed
+        ];
+        // Cumulative total times for warm incremental
+        const warmCumulative = warmIncremental.totalFeeds.map((f, i) =>
+            coldStart.total[coldStart.total.length - 1] +
+            warmIncremental.deltaMs.slice(0, i + 1).reduce((a, b) => a + b, 0)
+        );
+        // Real RSS total time (end-to-end for this run)
+        const realRssTotal = realRssBenchmark.totalMs;
+
+        // GC spike indices in warmIncremental (0-based): 25k=2, 45k=6
+        const gcSpikeIndices = new Set([2, 6]);
+
+        // ─────────────────────────────────────────────────────────────
+        //  CHART.JS DEFAULTS
+        // ─────────────────────────────────────────────────────────────
+        Chart.defaults.color = '#aaa';
+        Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
+
+        // Annotation plugin (inline, no CDN needed)
+        const gcAnnotation = {
+            id: 'gcAnnotation',
+            afterDatasetsDraw(chart) {
+                const { ctx, chartArea: { left, right }, scales: { x, y } } = chart;
+                warmIncremental.totalFeeds.forEach((feed, i) => {
+                    if (!gcSpikeIndices.has(i)) return;
+                    const xPos = x.getPixelForValue(warmIncremental.labels[i]);
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(xPos, y.getPixelForValue(0));
+                    ctx.lineTo(xPos, chartArea.top);
+                    ctx.strokeStyle = 'rgba(255,107,107,0.7)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([4, 4]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = '#ff6b6b';
+                    ctx.font = 'bold 11px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('GC spike', xPos, y.getPixelForValue(chartArea.top + 14));
+                    ctx.restore();
+                });
+            }
+        };
+
+        // ─────────────────────────────────────────────────────────────
+        //  CHART 1 — LINEAR SCALE
+        // ─────────────────────────────────────────────────────────────
+        const linearCtx = document.getElementById('linearChart').getContext('2d');
+
+        // Build datasets with region-colored points
+        const makePointStyles = (isCold) =>
+            isCold ? { pointBackgroundColor: '#ffc107', pointRadius: 7, pointBorderWidth: 2 } :
+                     { pointBackgroundColor: '#00d9ff', pointRadius: 6, pointBorderWidth: 2 };
+
+        new Chart(linearCtx, {
+            type: 'line',
+            data: {
+                labels: [...coldStart.feeds.map(String), ...warmIncremental.labels, 'Real RSS\n10k'],
+                datasets: [
+                    {
+                        label: 'Total Duration',
+                        data: [...coldStart.total, ...warmCumulative, realRssTotal],
+                        borderColor: '#00d9ff',
+                        backgroundColor: 'rgba(0,217,255,0.08)',
+                        borderWidth: 3,
+                        tension: 0.2,
+                        pointRadius: [...coldStart.total.map(() => 7), ...warmCumulative.map(() => 6), 10],
+                        pointBackgroundColor: [...coldStart.total.map(() => '#ffc107'), ...warmCumulative.map(() => '#00d9ff'), '#ff9500'],
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        segment: {
+                            borderColor: (ctx) => {
+                                const idx = ctx.p0DataIndex;
+                                return idx >= coldStart.feeds.length - 1 ? '#00d9ff' : '#ffc107';
+                            }
+                        }
+                    },
+                    {
+                        label: 'Processing',
+                        data: [...coldStart.processing, ...Array(warmIncremental.labels.length).fill(null), null],
+                        borderColor: '#e94560',
+                        backgroundColor: 'rgba(233,69,96,0.1)',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#e94560'
+                    },
+                    {
+                        label: 'Seed',
+                        data: [...coldStart.seed, ...Array(warmIncremental.labels.length).fill(null), realRssBenchmark.seedMs],
+                        borderColor: '#ffc107',
+                        backgroundColor: 'rgba(255,193,7,0.1)',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#ffc107'
+                    },
+                    {
+                        label: 'Queue',
+                        data: [...coldStart.queue, ...Array(warmIncremental.labels.length).fill(null), null],
+                        borderColor: '#28a745',
+                        backgroundColor: 'rgba(40,167,69,0.1)',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#28a745'
+                    },
+                    {
+                        label: 'Real RSS (net latency overhead)',
+                        data: [...coldStart.total.map(() => null), ...warmIncremental.totalFeeds.map(() => null), realRssBenchmark.processingMs],
+                        borderColor: '#ff9500',
+                        backgroundColor: 'rgba(255,149,0,0.1)',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        pointRadius: 9,
+                        pointBackgroundColor: '#ff9500',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        pointStyle: 'rectRot'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()} ms`,
+                            title: ctx => {
+                                const idx = ctx[0].dataIndex;
+                                if (idx < coldStart.feeds.length) return `Cold-start: ${coldStart.feeds[idx].toLocaleString()} feeds`;
+                                const wi = idx - coldStart.feeds.length;
+                                if (wi >= warmIncremental.totalFeeds.length) return `Real RSS: 10,000 feeds (external servers)`;
+                                return `Warm incremental: ${warmIncremental.totalFeeds[wi].toLocaleString()} total feeds`;
+                            }
+                        }
+                    },
+                    annotation: {
+                        annotations: {
+                            coldZone: {
+                                type: 'box',
+                                xMin: 0,
+                                xMax: 3.5,
+                                backgroundColor: 'rgba(255,193,7,0.04)',
+                                borderColor: 'rgba(255,193,7,0.3)',
+                                borderDash: [4, 4],
+                                label: {
+                                    display: true,
+                                    content: 'COLD-START',
+                                    color: '#ffc107',
+                                    font: { size: 11, weight: 'bold' },
+                                    position: 'start',
+                                    padding: 4
+                                }
+                            },
+                            warmZone: {
+                                type: 'box',
+                                xMin: 3.5,
+                                xMax: 11.5,
+                                backgroundColor: 'rgba(0,217,255,0.04)',
+                                borderColor: 'rgba(0,217,255,0.3)',
+                                borderDash: [4, 4],
+                                label: {
+                                    display: true,
+                                    content: 'WARM DB (incremental adds)',
+                                    color: '#00d9ff',
+                                    font: { size: 11, weight: 'bold' },
+                                    position: 'start',
+                                    padding: 4
+                                }
+                            },
+                            realRssZone: {
+                                type: 'box',
+                                xMin: 11.5,
+                                xMax: 12.5,
+                                backgroundColor: 'rgba(255,149,0,0.06)',
+                                borderColor: 'rgba(255,149,0,0.4)',
+                                borderDash: [4, 4],
+                                label: {
+                                    display: true,
+                                    content: 'REAL RSS',
+                                    color: '#ff9500',
+                                    font: { size: 11, weight: 'bold' },
+                                    position: 'start',
+                                    padding: 4
+                                }
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Number of Feeds', color: '#00d9ff' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { maxRotation: 0 }
+                    },
+                    y: {
+                        title: { display: true, text: 'Duration (ms)', color: '#00d9ff' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { callback: v => v >= 1000 ? (v/1000).toFixed(0)+'k' : v }
+                    }
+                }
+            },
+            plugins: [gcAnnotation]
+        });
+
+        // ─────────────────────────────────────────────────────────────
+        //  CHART 2 — LOG-LOG SCALE
+        // ─────────────────────────────────────────────────────────────
+        const logLogCtx = document.getElementById('logLogChart').getContext('2d');
+
+        new Chart(logLogCtx, {
+            type: 'line',
+            data: {
+                labels: [...coldStart.feeds.map(String), ...warmIncremental.labels, 'Real RSS\n10k'],
+                datasets: [
+                    {
+                        label: 'Total (warm cum.)',
+                        data: [...coldStart.total, ...warmCumulative, realRssTotal],
+                        borderColor: '#00d9ff',
+                        backgroundColor: 'rgba(0,217,255,0.1)',
+                        borderWidth: 3,
+                        tension: 0,
+                        pointRadius: [...coldStart.total.map(() => 7), ...warmCumulative.map(() => 6), 10],
+                        pointBackgroundColor: [...coldStart.total.map(() => '#ffc107'), ...warmCumulative.map(() => '#00d9ff'), '#ff9500'],
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        segment: { borderColor: '#00d9ff' }
+                    },
+                    {
+                        label: 'Processing',
+                        data: [...coldStart.processing, ...Array(warmIncremental.labels.length).fill(null), null],
+                        borderColor: '#e94560',
+                        borderWidth: 2,
+                        tension: 0,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#e94560',
+                        showLine: true
+                    },
+                    {
+                        label: 'Seed (variable)',
+                        data: [...coldStart.seed, ...Array(warmIncremental.labels.length).fill(null), realRssBenchmark.seedMs],
+                        borderColor: '#ffc107',
+                        borderWidth: 2,
+                        tension: 0,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#ffc107',
+                        showLine: true
+                    },
+                    {
+                        label: 'Queue',
+                        data: [...coldStart.queue, ...Array(warmIncremental.labels.length).fill(null), null],
+                        borderColor: '#28a745',
+                        borderWidth: 2,
+                        tension: 0,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#28a745',
+                        showLine: true
+                    },
+                    {
+                        label: 'Real RSS (net latency overhead)',
+                        data: [...coldStart.total.map(() => null), ...warmIncremental.totalFeeds.map(() => null), realRssBenchmark.processingMs],
+                        borderColor: '#ff9500',
+                        backgroundColor: 'rgba(255,149,0,0.15)',
+                        borderWidth: 2,
+                        tension: 0,
+                        pointRadius: 9,
+                        pointBackgroundColor: '#ff9500',
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        showLine: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y.toLocaleString()} ms`,
+                            title: ctx => {
+                                const idx = ctx[0].dataIndex;
+                                if (idx < coldStart.feeds.length) return `${coldStart.feeds[idx].toLocaleString()} feeds (cold)`;
+                                const wi = idx - coldStart.feeds.length;
+                                if (wi >= warmIncremental.totalFeeds.length) return `Real RSS: 10,000 feeds (external servers)`;
+                                return `${warmIncremental.totalFeeds[wi].toLocaleString()} feeds (warm)`;
+                            }
+                        }
+                    },
+                    annotation: {
+                        annotations: {
+                            coldZone: {
+                                type: 'box',
+                                xMin: 0, xMax: 3.5,
+                                backgroundColor: 'rgba(255,193,7,0.04)',
+                                borderColor: 'rgba(255,193,7,0.25)',
+                                borderDash: [4, 4],
+                                label: { display: true, content: 'COLD-START', color: '#ffc107', font: { size: 11, weight: 'bold' }, padding: 4 }
+                            },
+                            warmZone: {
+                                type: 'box',
+                                xMin: 3.5, xMax: 11.5,
+                                backgroundColor: 'rgba(0,217,255,0.04)',
+                                borderColor: 'rgba(0,217,255,0.25)',
+                                borderDash: [4, 4],
+                                label: { display: true, content: 'WARM DB', color: '#00d9ff', font: { size: 11, weight: 'bold' }, padding: 4 }
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        type: 'logarithmic',
+                        title: { display: true, text: 'Number of Feeds (log scale)', color: '#00d9ff' },
+                        grid: { color: 'rgba(255,255,255,0.05)' }
+                    },
+                    y: {
+                        type: 'logarithmic',
+                        title: { display: true, text: 'Duration (ms, log scale)', color: '#00d9ff' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { callback: v => v >= 1000 ? (v/1000).toFixed(0)+'k' : v }
+                    }
+                }
+            },
+            plugins: [gcAnnotation]
+        });
+
+        // ─────────────────────────────────────────────────────────────
+        //  CHART 3 — ms/feed EFFICIENCY
+        // ─────────────────────────────────────────────────────────────
+        const effCtx = document.getElementById('efficiencyChart').getContext('2d');
+
+        const effLabels = [...coldStart.feeds.map(String), ...warmIncremental.labels, 'Real RSS\n10k'];
+        const effData   = allMsPerFeed;
+
+        // Point colors: cold=yellow, warm=cyan, gc=red, real=orange
+        const effPointBg = effData.map((_, i) => {
+            if (i < coldStart.feeds.length) return '#ffc107';
+            const wi = i - coldStart.feeds.length;
+            if (wi >= warmIncremental.totalFeeds.length) return '#ff9500'; // Real RSS
+            return gcSpikeIndices.has(wi) ? '#ff6b6b' : '#00d9ff';
+        });
+        const effPointRadius = effData.map((_, i) => {
+            if (i < coldStart.feeds.length) return 7;
+            const wi = i - coldStart.feeds.length;
+            if (wi >= warmIncremental.totalFeeds.length) return 10; // Real RSS
+            return gcSpikeIndices.has(wi) ? 10 : 6;
+        });
+
+        new Chart(effCtx, {
+            type: 'line',
+            data: {
+                labels: effLabels,
+                datasets: [
+                    // Steady-state reference line
+                    {
+                        label: 'Steady-state baseline (0.26 ms/feed)',
+                        data: effData.map(() => steadyState.msPerFeed),
+                        borderColor: '#6f42c1',
+                        borderWidth: 3,
+                        borderDash: [8, 4],
+                        pointRadius: 0,
+                        fill: false
+                    },
+                    // ms/feed line
+                    {
+                        label: 'ms/feed (measured)',
+                        data: effData,
+                        borderColor: '#00d9ff',
+                        backgroundColor: 'rgba(0,217,255,0.1)',
+                        borderWidth: 3,
+                        tension: 0.3,
+                        pointRadius: effPointRadius,
+                        pointBackgroundColor: effPointBg,
+                        pointBorderColor: '#fff',
+                        pointBorderWidth: 2,
+                        fill: true
+                    },
+                    // Real RSS annotation line
+                    {
+                        label: 'Real RSS (18.03 ms/feed)',
+                        data: effData.map((_, i) => i === effData.length - 1 ? realRssBenchmark.msPerFeed : null),
+                        borderColor: '#ff9500',
+                        backgroundColor: 'rgba(255,149,0,0.2)',
+                        borderWidth: 2,
+                        borderDash: [4, 4],
+                        pointRadius: 0,
+                        fill: false,
+                        showLine: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ctx.datasetIndex === 0
+                                ? ` Steady-state: ${ctx.parsed.y} ms/feed`
+                                : ctx.datasetIndex === 2
+                                ? ` Real RSS: ${ctx.parsed.y.toFixed(2)} ms/feed`
+                                : ` ${ctx.parsed.y.toFixed(2)} ms/feed`,
+                            title: ctx => {
+                                const idx = ctx[0].dataIndex;
+                                if (idx < coldStart.feeds.length) return `Cold-start: ${coldStart.feeds[idx].toLocaleString()} feeds`;
+                                const wi = idx - coldStart.feeds.length;
+                                if (wi >= warmIncremental.totalFeeds.length) return `Real RSS: 10,000 feeds (6 external sources)`;
+                                return `Warm +${warmIncremental.deltaMs[wi].toLocaleString()}ms batch: ${warmIncremental.totalFeeds[wi].toLocaleString()} total feeds`;
+                            }
+                        }
+                    },
+                    annotation: {
+                        annotations: {
+                            coldZone: {
+                                type: 'box', xMin: 0, xMax: 3.5,
+                                backgroundColor: 'rgba(255,193,7,0.04)',
+                                borderColor: 'rgba(255,193,7,0.3)', borderDash: [4,4],
+                                label: { display: true, content: 'COLD-START', color: '#ffc107', font: { size: 11, weight: 'bold' }, padding: 4 }
+                            },
+                            warmZone: {
+                                type: 'box', xMin: 3.5, xMax: 11.5,
+                                backgroundColor: 'rgba(0,217,255,0.04)',
+                                borderColor: 'rgba(0,217,255,0.3)', borderDash: [4,4],
+                                label: { display: true, content: 'WARM DB', color: '#00d9ff', font: { size: 11, weight: 'bold' }, padding: 4 }
+                            },
+                            realRssZone: {
+                                type: 'box', xMin: 11.5, xMax: 12.5,
+                                backgroundColor: 'rgba(255,149,0,0.06)',
+                                borderColor: 'rgba(255,149,0,0.4)', borderDash: [4,4],
+                                label: { display: true, content: 'REAL RSS', color: '#ff9500', font: { size: 11, weight: 'bold' }, padding: 4 }
+                            },
+                            realRssZone: {
+                                type: 'box', xMin: 11.5, xMax: 12.5,
+                                backgroundColor: 'rgba(255,149,0,0.06)',
+                                borderColor: 'rgba(255,149,0,0.4)', borderDash: [4,4],
+                                label: { display: true, content: 'REAL RSS', color: '#ff9500', font: { size: 11, weight: 'bold' }, padding: 4 }
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Total Feeds', color: '#00d9ff' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        ticks: { maxRotation: 0 }
+                    },
+                    y: {
+                        title: { display: true, text: 'ms / feed', color: '#00d9ff' },
+                        grid: { color: 'rgba(255,255,255,0.05)' },
+                        min: 0,
+                        max: 60
+                    }
+                }
+            },
+            plugins: [{
+                id: 'gcAnnotations',
+                afterDatasetsDraw(chart) {
+                    const { ctx, chartArea, scales: { x, y } } = chart;
+                    warmIncremental.totalFeeds.forEach((feed, i) => {
+                        if (!gcSpikeIndices.has(i)) return;
+                        const xPos = x.getPixelForValue(warmIncremental.labels[i]);
+                        const yPos = y.getPixelForValue(allMsPerFeed[coldStart.feeds.length + i]);
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(xPos, yPos, 14, 0, 2 * Math.PI);
+                        ctx.strokeStyle = '#ff6b6b';
+                        ctx.lineWidth = 3;
+                        ctx.stroke();
+                        ctx.fillStyle = '#ff6b6b';
+                        ctx.font = 'bold 11px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('GC', xPos, yPos + 4);
+                        ctx.restore();
+                    });
+                }
+            }]
+        });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+</body>
+</html>

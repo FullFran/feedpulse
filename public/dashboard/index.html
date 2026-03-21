@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>RSS Monitor Dashboard</title>
+    <link rel="stylesheet" href="/dashboard/styles.css">
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Operator Console</p>
+          <h1>RSS Monitor Dashboard</h1>
+          <p class="lede">Run the MVP from one place: watch readiness, inspect recent activity, create feeds and rules, and push urgent checks or alert retries without leaving the API origin.</p>
+        </div>
+        <div class="hero-actions">
+          <button id="refresh-all" class="button primary" type="button">Refresh Live Data</button>
+          <a class="button ghost" href="/docs" target="_blank" rel="noreferrer">Open API Docs</a>
+        </div>
+      </header>
+
+      <section class="status-grid" id="summary-cards"></section>
+
+      <section class="panel-stack">
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Create Feed</p>
+              <h2>Add a monitored source</h2>
+            </div>
+            <p class="hint">The API validates URL and interval bounds.</p>
+          </div>
+          <form id="feed-form" class="form-grid">
+            <label>
+              <span>Feed URL</span>
+              <input name="url" type="url" placeholder="https://example.com/rss.xml" required>
+            </label>
+            <label>
+              <span>Poll Interval (seconds)</span>
+              <input name="poll_interval_seconds" type="number" min="300" max="10800" value="1800" required>
+            </label>
+            <label>
+              <span>Status</span>
+              <select name="status">
+                <option value="active">active</option>
+                <option value="paused">paused</option>
+              </select>
+            </label>
+            <button class="button primary" type="submit">Create Feed</button>
+          </form>
+          <p class="feedback" id="feed-feedback"></p>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Create Rule</p>
+              <h2>Define a keyword match</h2>
+            </div>
+            <p class="hint">Comma-separated keywords are normalized before submit.</p>
+          </div>
+          <form id="rule-form" class="form-grid">
+            <label>
+              <span>Name</span>
+              <input name="name" type="text" maxlength="120" placeholder="AI updates" required>
+            </label>
+            <label>
+              <span>Include Keywords</span>
+              <input name="include_keywords" type="text" placeholder="AI, LLM" required>
+            </label>
+            <label>
+              <span>Exclude Keywords</span>
+              <input name="exclude_keywords" type="text" placeholder="crypto, giveaway">
+            </label>
+            <button class="button primary" type="submit">Create Rule</button>
+          </form>
+          <p class="feedback" id="rule-feedback"></p>
+        </article>
+      </section>
+
+      <section class="data-grid">
+        <article class="panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Feeds</p>
+              <h2>Sources and controls</h2>
+            </div>
+          </div>
+          <div id="feeds-list" class="card-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Rules</p>
+              <h2>Active match logic</h2>
+            </div>
+          </div>
+          <div id="rules-list" class="card-list"></div>
+        </article>
+
+        <article class="panel wide">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Entries</p>
+              <h2>Latest ingested items</h2>
+            </div>
+          </div>
+          <div id="entries-list" class="card-list"></div>
+        </article>
+
+        <article class="panel wide">
+          <div class="panel-heading compact">
+            <div>
+              <p class="eyebrow">Alerts</p>
+              <h2>Delivery queue and resend state</h2>
+            </div>
+          </div>
+          <div id="alerts-list" class="card-list"></div>
+        </article>
+      </section>
+    </div>
+
+    <template id="summary-card-template">
+      <article class="status-card">
+        <p class="status-label"></p>
+        <strong class="status-value"></strong>
+        <span class="status-detail"></span>
+      </article>
+    </template>
+
+    <script src="/dashboard/app.js" defer></script>
+  </body>
+  </html>

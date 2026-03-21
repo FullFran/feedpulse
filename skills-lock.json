@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "bash-linux": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "6eae117aa43b64623628983fdb1bfa654cf7714646a579c882282655c7ef7942"
+    },
+    "clean-ddd-hexagonal": {
+      "source": "ccheney/robust-skills",
+      "sourceType": "github",
+      "computedHash": "b9a54e257685086d0034bd8277964452b7208e2f18bf68d158996936ce667b6a"
+    },
+    "monitoring-observability": {
+      "source": "supercent-io/skills-template",
+      "sourceType": "github",
+      "computedHash": "65abdcee441fa3710c077cbb7ef74d7843bd0163ba3551c27ebe7fdedbdd3953"
+    },
+    "nestjs-best-practices": {
+      "source": "kadajett/agent-nestjs-skills",
+      "sourceType": "github",
+      "computedHash": "1b6f82e889d19d305e38e35594de08eca0242321f353cafa4cf5e61dd3aa1a73"
+    },
+    "rabbitmq-expert": {
+      "source": "martinholovsky/claude-skills-generator",
+      "sourceType": "github",
+      "computedHash": "584e368d2811078acfb437c22ca07f1c93da52cbdcabcc8c24562128185c4b6b"
+    },
+    "stress-testing": {
+      "source": "aj-geddes/useful-ai-prompts",
+      "sourceType": "github",
+      "computedHash": "d35ac6fe3d569131943a98a6ecc387c95ff87ea6fc4474a1018560413e653c2d"
+    }
+  }
+}

@@ -1,0 +1,52 @@
+name: Smoke
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build application
+        run: npm run build
+
+      - name: Start smoke stack
+        run: npm run smoke:stack:up
+
+      - name: Run stack smoke verification
+        run: npm run smoke:stack:run
+
+      - name: Capture docker diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p artifacts/smoke
+          docker compose -p rss-monitor-smoke -f docker-compose.yml -f docker-compose.smoke.yml ps > artifacts/smoke/compose-ps.txt
+          docker compose -p rss-monitor-smoke -f docker-compose.yml -f docker-compose.smoke.yml logs --no-color > artifacts/smoke/compose.log
+
+      - name: Upload smoke artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-artifacts
+          path: artifacts/smoke
+
+      - name: Tear down smoke stack
+        if: always()
+        run: npm run smoke:stack:down

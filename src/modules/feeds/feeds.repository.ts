@@ -1,0 +1,235 @@
+import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
+
+import { DatabaseService } from '../../infrastructure/persistence/database.service';
+
+import { Feed } from './domain/feed.entity';
+
+type QueryExecutor = Pick<DatabaseService, 'query'>;
+
+interface FeedRow {
+  id: number;
+  url: string;
+  status: 'active' | 'paused' | 'error';
+  etag: string | null;
+  last_modified: string | null;
+  last_checked_at: Date | null;
+  next_check_at: Date;
+  poll_interval_seconds: number;
+  error_count: number;
+  last_error: string | null;
+  avg_response_ms: number | null;
+  avg_items_per_day: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+function mapFeed(row: FeedRow): Feed {
+  return {
+    id: row.id,
+    url: row.url,
+    status: row.status,
+    etag: row.etag,
+    lastModified: row.last_modified,
+    lastCheckedAt: row.last_checked_at?.toISOString() ?? null,
+    nextCheckAt: row.next_check_at.toISOString(),
+    pollIntervalSeconds: row.poll_interval_seconds,
+    errorCount: row.error_count,
+    lastError: row.last_error,
+    avgResponseMs: row.avg_response_ms,
+    avgItemsPerDay: row.avg_items_per_day,
+    createdAt: row.created_at.toISOString(),
+    updatedAt: row.updated_at.toISOString(),
+  };
+}
+
+@Injectable()
+export class FeedsRepository {
+  constructor(private readonly databaseService: DatabaseService) {}
+
+  async create(input: { url: string; pollIntervalSeconds: number; status: 'active' | 'paused' | 'error' }): Promise<Feed> {
+    try {
+      const result = await this.databaseService.query<FeedRow>(
+        `
+          INSERT INTO feeds (url, poll_interval_seconds, status, next_check_at)
+          VALUES ($1, $2, $3, NOW())
+          RETURNING *
+        `,
+        [input.url, input.pollIntervalSeconds, input.status],
+      );
+
+      return mapFeed(result.rows[0]);
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error && 'code' in error && error.code === '23505') {
+        throw new ConflictException('feed_already_exists');
+      }
+
+      throw error;
+    }
+  }
+
+  async list(filters: {
+    status?: string;
+    query?: string;
+    page: number;
+    pageSize: number;
+  }): Promise<{ items: Feed[]; total: number }> {
+    const where: string[] = [];
+    const values: unknown[] = [];
+
+    if (filters.status) {
+      where.push(`status = $${values.length + 1}`);
+      values.push(filters.status);
+    }
+
+    if (filters.query) {
+      where.push(`url ILIKE $${values.length + 1}`);
+      values.push(`%${filters.query}%`);
+    }
+
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const offset = (filters.page - 1) * filters.pageSize;
+    const listValues = [...values, filters.pageSize, offset];
+
+    const [itemsResult, totalResult] = await Promise.all([
+      this.databaseService.query<FeedRow>(
+        `SELECT * FROM feeds ${clause} ORDER BY created_at DESC LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        listValues,
+      ),
+      this.databaseService.query<{ count: string }>(`SELECT COUNT(*)::text AS count FROM feeds ${clause}`, values),
+    ]);
+
+    return {
+      items: itemsResult.rows.map(mapFeed),
+      total: Number(totalResult.rows[0]?.count ?? '0'),
+    };
+  }
+
+  async claimDueFeeds(limit: number): Promise<Feed[]> {
+    if (limit <= 0) {
+      throw new BadRequestException('scheduler_batch_size_invalid');
+    }
+
+    const dueFeeds = await this.databaseService.query<FeedRow>(
+      `
+        SELECT *
+        FROM feeds
+        WHERE status = 'active' AND next_check_at <= NOW()
+        ORDER BY next_check_at ASC
+        LIMIT $1
+      `,
+      [limit],
+    );
+
+    if (!dueFeeds.rows.length) {
+      return [];
+    }
+
+    for (const feed of dueFeeds.rows) {
+      const nextCheckAt = new Date(Date.now() + feed.poll_interval_seconds * 1000).toISOString();
+      await this.databaseService.query(
+        `
+          UPDATE feeds
+          SET next_check_at = $2,
+              updated_at = NOW()
+          WHERE id = $1
+        `,
+        [feed.id, nextCheckAt],
+      );
+    }
+
+    return dueFeeds.rows.map((row) =>
+      mapFeed({
+        ...row,
+        next_check_at: new Date(Date.now() + row.poll_interval_seconds * 1000),
+        updated_at: new Date(),
+      }),
+    );
+  }
+
+  async findById(id: number): Promise<Feed | null> {
+    const result = await this.databaseService.query<FeedRow>('SELECT * FROM feeds WHERE id = $1', [id]);
+    return result.rows[0] ? mapFeed(result.rows[0]) : null;
+  }
+
+  async update(input: { id: number; status?: 'active' | 'paused' | 'error'; pollIntervalSeconds?: number }): Promise<Feed | null> {
+    const current = await this.findById(input.id);
+
+    if (!current) {
+      return null;
+    }
+
+    const status = input.status ?? current.status;
+    const pollIntervalSeconds = input.pollIntervalSeconds ?? current.pollIntervalSeconds;
+    let nextCheckAt = current.nextCheckAt;
+
+    if (status === 'active' && current.status !== 'active') {
+      nextCheckAt = new Date().toISOString();
+    } else if (status === 'active' && pollIntervalSeconds !== current.pollIntervalSeconds) {
+      nextCheckAt = new Date(Date.now() + pollIntervalSeconds * 1000).toISOString();
+    }
+
+    const result = await this.databaseService.query<FeedRow>(
+      `
+        UPDATE feeds
+        SET status = $2,
+            poll_interval_seconds = $3,
+            next_check_at = $4,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+      `,
+      [input.id, status, pollIntervalSeconds, nextCheckAt],
+    );
+
+    return result.rows[0] ? mapFeed(result.rows[0]) : null;
+  }
+
+  async disable(id: number): Promise<boolean> {
+    const updated = await this.update({ id, status: 'paused' });
+    return Boolean(updated);
+  }
+
+  async updateAfterFetch(input: {
+    feedId: number;
+    etag?: string | null;
+    lastModified?: string | null;
+    status: 'active' | 'error';
+    errorCount: number;
+    lastError?: string | null;
+    avgResponseMs?: number | null;
+    nextCheckAt?: string;
+    executor?: QueryExecutor;
+  }): Promise<void> {
+    const executor = input.executor ?? this.databaseService;
+    await executor.query(
+      `
+        UPDATE feeds
+        SET etag = COALESCE($2, etag),
+            last_modified = COALESCE($3, last_modified),
+            status = $4,
+            error_count = $5,
+            last_error = $6,
+            avg_response_ms = COALESCE($7, avg_response_ms),
+            last_checked_at = NOW(),
+            next_check_at = $8,
+            updated_at = NOW()
+        WHERE id = $1
+      `,
+      [
+        input.feedId,
+        input.etag ?? null,
+        input.lastModified ?? null,
+        input.status,
+        input.errorCount,
+        input.lastError ?? null,
+        input.avgResponseMs ?? null,
+        input.nextCheckAt ?? new Date().toISOString(),
+      ],
+    );
+  }
+
+  async countByStatus(status: 'active' | 'error'): Promise<number> {
+    const result = await this.databaseService.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM feeds WHERE status = $1', [status]);
+    return Number(result.rows[0]?.count ?? '0');
+  }
+}

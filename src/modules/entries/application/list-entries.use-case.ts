@@ -1,0 +1,12 @@
+import { Injectable } from '@nestjs/common';
+
+import { EntriesRepository } from '../entries.repository';
+
+@Injectable()
+export class ListEntriesUseCase {
+  constructor(private readonly entriesRepository: EntriesRepository) {}
+
+  execute(input: { page: number; pageSize: number; feedId?: number; search?: string }) {
+    return this.entriesRepository.list(input);
+  }
+}

@@ -1,0 +1,36 @@
+services:
+  smoke-monitoring:
+    image: node:24-bookworm-slim
+    working_dir: /workspace
+    command: ["npx", "tsx", "scripts/smoke/mock-monitoring-server.ts"]
+    volumes:
+      - .:/workspace
+    environment:
+      SMOKE_MONITORING_PORT: 4010
+    ports:
+      - '${SMOKE_MONITORING_PORT:-4010}:4010'
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4010/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    environment:
+      WEBHOOK_NOTIFIER_URL: http://smoke-monitoring:4010/webhook
+    depends_on:
+      smoke-monitoring:
+        condition: service_healthy
+
+  worker:
+    environment:
+      WEBHOOK_NOTIFIER_URL: http://smoke-monitoring:4010/webhook
+    depends_on:
+      smoke-monitoring:
+        condition: service_healthy
