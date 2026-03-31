@@ -64,8 +64,8 @@ export const envSchema = z.object({
   RATE_LIMIT_BASE_BACKOFF_MS: z.coerce.number().int().positive().default(1000),
   /** Port on which the worker exposes its /metrics endpoint (aggregated by the API). Default: 3001 */
   WORKER_METRICS_PORT: z.coerce.number().int().positive().default(3001),
-  /** Maximum OPML upload size in bytes. Default: 2097152 (2 MiB). */
-  OPML_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(2 * 1024 * 1024),
+  /** Maximum OPML upload size in bytes. Default: 10485760 (10 MiB). */
+  OPML_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
   /** Max jitter (seconds) for initial feed scheduling after OPML import. Default: 120 */
   OPML_INITIAL_JITTER_MAX_SECONDS: z.coerce.number().int().nonnegative().default(120),
   /** Rollout guard for CLI/TUI agent interface v1 adapters. */
