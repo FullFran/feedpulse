@@ -4,6 +4,13 @@ import { DatabaseService } from '../../infrastructure/persistence/database.servi
 
 type QueryExecutor = Pick<DatabaseService, 'query'>;
 
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 export interface Entry {
   id: string;
   feedId: number;
@@ -96,7 +103,7 @@ export class EntriesRepository {
           entry.content,
           entry.contentHash,
           entry.publishedAt,
-          `${entry.title ?? ''} ${entry.content ?? ''}`,
+          normalizeSearchText(`${entry.title ?? ''} ${entry.content ?? ''}`),
         ],
       );
 
@@ -126,8 +133,8 @@ export class EntriesRepository {
     }
 
     if (input.search) {
-      where.push(`(COALESCE(title, '') ILIKE $${values.length + 1} OR COALESCE(content, '') ILIKE $${values.length + 1})`);
-      values.push(`%${input.search}%`);
+      where.push(`normalized_search_document ILIKE $${values.length + 1}`);
+      values.push(`%${normalizeSearchText(input.search)}%`);
     }
 
     if (input.from) {

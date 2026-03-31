@@ -14,6 +14,13 @@ import { FeedsRepository } from '../../feeds/feeds.repository';
 import { RulesRepository } from '../../rules/rules.repository';
 import { FEED_FETCHER, FeedFetcherPort } from '../domain/feed-fetcher.port';
 
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 @Injectable()
 export class ProcessFeedJobUseCase {
   private readonly parser = new Parser();
@@ -89,12 +96,12 @@ export class ProcessFeedJobUseCase {
         const insertedEntries = await this.entriesRepository.insertMany(feed.tenantId, feed.id, normalizedEntries, client);
         const activeRules = await this.rulesRepository.listActive(feed.tenantId);
         const matches = insertedEntries.flatMap((entry) => {
-          const haystack = `${entry.title ?? ''} ${entry.content ?? ''}`.toLowerCase();
+          const haystack = normalizeSearchText(`${entry.title ?? ''} ${entry.content ?? ''}`);
 
           return activeRules
             .filter((rule) => {
-              const includes = rule.includeKeywords.every((keyword) => haystack.includes(keyword.toLowerCase()));
-              const excludes = rule.excludeKeywords.some((keyword) => haystack.includes(keyword.toLowerCase()));
+              const includes = rule.includeKeywords.every((keyword) => haystack.includes(normalizeSearchText(keyword)));
+              const excludes = rule.excludeKeywords.some((keyword) => haystack.includes(normalizeSearchText(keyword)));
               return includes && !excludes;
             })
             .map((rule) => ({ entryId: entry.id, ruleId: rule.id }));
