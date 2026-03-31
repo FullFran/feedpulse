@@ -34,12 +34,9 @@ export class HttpFeedFetcher implements FeedFetcherPort {
     const startedAt = Date.now();
 
     try {
-      const agent = this.agents.getAgentForUrl(url);
       const response = await fetch(url, {
         headers,
         signal: controller.signal,
-        // @ts-expect-error - dispatcher is supported in Node.js 18+ but not in TS types yet
-        dispatcher: agent,
       });
 
       const statusCode = response.status;
