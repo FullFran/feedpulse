@@ -18,6 +18,7 @@ export interface Entry {
 
 interface EntryRow {
   id: string;
+  tenant_id: string;
   feed_id: number;
   title: string | null;
   link: string | null;
@@ -30,6 +31,7 @@ interface EntryRow {
 
 interface EntryFilterRow {
   id: string;
+  tenant_id: string;
   feed_id: number;
   title: string | null;
   content: string | null;
@@ -63,6 +65,7 @@ export class EntriesRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
   async insertMany(
+    tenantId: string,
     feedId: number,
     entries: Array<{
       title: string | null;
@@ -79,12 +82,13 @@ export class EntriesRepository {
     for (const entry of entries) {
       const result = await executor.query<EntryRow>(
         `
-          INSERT INTO entries (feed_id, title, link, guid, content, content_hash, published_at, normalized_search_document)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, LOWER($8))
+          INSERT INTO entries (tenant_id, feed_id, title, link, guid, content, content_hash, published_at, normalized_search_document)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, LOWER($9))
           ON CONFLICT DO NOTHING
           RETURNING id, feed_id, title, link, guid, content, content_hash, published_at, fetched_at
         `,
         [
+          tenantId,
           feedId,
           entry.title,
           entry.link,
@@ -104,9 +108,9 @@ export class EntriesRepository {
     return created;
   }
 
-  async list(input: { page: number; pageSize: number; feedId?: number; search?: string }): Promise<{ items: Entry[]; total: number }> {
-    const where: string[] = [];
-    const values: unknown[] = [];
+  async list(input: { tenantId: string; page: number; pageSize: number; feedId?: number; search?: string }): Promise<{ items: Entry[]; total: number }> {
+    const where: string[] = [`tenant_id = $1`];
+    const values: unknown[] = [input.tenantId];
 
     if (input.feedId) {
       where.push(`feed_id = $${values.length + 1}`);
@@ -134,11 +138,22 @@ export class EntriesRepository {
     };
   }
 
-  async listForFilterSearch(limit: number): Promise<EntryFilterCandidate[]> {
+  async listForFilterSearch(limit: number, tenantId?: string): Promise<EntryFilterCandidate[]> {
     const cappedLimit = Math.max(1, Math.min(limit, 5000));
-    const result = await this.databaseService.query<EntryFilterRow>(
+    const result = tenantId
+      ? await this.databaseService.query<EntryFilterRow>(
       `
-        SELECT id, feed_id, title, content, published_at
+        SELECT id, tenant_id, feed_id, title, content, published_at
+        FROM entries
+        WHERE tenant_id = $2
+        ORDER BY published_at DESC NULLS LAST, id DESC
+        LIMIT $1
+      `,
+      [cappedLimit, tenantId],
+    )
+      : await this.databaseService.query<EntryFilterRow>(
+      `
+        SELECT id, tenant_id, feed_id, title, content, published_at
         FROM entries
         ORDER BY published_at DESC NULLS LAST, id DESC
         LIMIT $1

@@ -5,6 +5,7 @@ import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { paginatedResponse, successResponse } from '../../../shared/http/response';
 import { ApiEnvelopeResponse, ApiStandardErrorResponses } from '../../../shared/http/swagger';
 import { AlertDeliveryResultModel, AlertModel } from '../../../shared/http/swagger.models';
+import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context';
 
 import { DeliverAlertUseCase } from '../application/deliver-alert.use-case';
 import { GetAlertUseCase } from '../application/get-alert.use-case';
@@ -25,7 +26,9 @@ export class AlertsController {
   @ApiEnvelopeResponse(AlertModel, { status: 200, description: 'Alert list returned successfully.', isArray: true, paginated: true })
   @ApiStandardErrorResponses()
   async list(@Req() request: Request, @Query() query: ListAlertsQueryDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     const result = await this.listAlertsUseCase.execute({
+      tenantId,
       page: query.page,
       pageSize: query.page_size,
       sent: query.sent,
@@ -40,7 +43,8 @@ export class AlertsController {
   @ApiEnvelopeResponse(AlertModel, { status: 200, description: 'Alert returned successfully.' })
   @ApiStandardErrorResponses()
   async getById(@Req() request: Request, @Param('id', ParseIntPipe) id: number) {
-    return successResponse(request, await this.getAlertUseCase.execute(id));
+    const tenantId = resolveTenantIdFromRequest(request);
+    return successResponse(request, await this.getAlertUseCase.execute(id, tenantId));
   }
 
   @Post(':id/send')
@@ -50,6 +54,7 @@ export class AlertsController {
   @ApiEnvelopeResponse(AlertDeliveryResultModel, { status: 202, description: 'Alert delivery was queued successfully.' })
   @ApiStandardErrorResponses()
   async send(@Req() request: Request, @Param('id', ParseIntPipe) id: number) {
-    return successResponse(request, await this.deliverAlertUseCase.execute(id, 'manual'));
+    const tenantId = resolveTenantIdFromRequest(request);
+    return successResponse(request, await this.deliverAlertUseCase.execute(id, 'manual', tenantId));
   }
 }

@@ -11,8 +11,8 @@ export class CheckFeedNowUseCase {
     @Inject(FETCH_FEED_QUEUE_TOKEN) private readonly fetchFeedQueue: FetchFeedQueuePort,
   ) {}
 
-  async execute(id: number): Promise<{ id: number; status: 'queued' }> {
-    const feed = await this.feedsRepository.findById(id);
+  async execute(id: number, tenantId: string): Promise<{ id: number; status: 'queued' }> {
+    const feed = await this.feedsRepository.findById(id, tenantId);
 
     if (!feed) {
       throw new NotFoundException('feed_not_found');

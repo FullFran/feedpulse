@@ -6,6 +6,7 @@ import { Rule } from './domain/rule.entity';
 
 interface RuleRow {
   id: number;
+  tenant_id: string;
   name: string;
   include_keywords: string[];
   exclude_keywords: string[];
@@ -30,22 +31,22 @@ function mapRule(row: RuleRow): Rule {
 export class RulesRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
-  async create(input: { name: string; includeKeywords: string[]; excludeKeywords: string[]; isActive: boolean }): Promise<Rule> {
+  async create(input: { tenantId: string; name: string; includeKeywords: string[]; excludeKeywords: string[]; isActive: boolean }): Promise<Rule> {
     const result = await this.databaseService.query<RuleRow>(
       `
-        INSERT INTO rules (name, include_keywords, exclude_keywords, is_active)
-        VALUES ($1, $2::text[], $3::text[], $4)
+        INSERT INTO rules (tenant_id, name, include_keywords, exclude_keywords, is_active)
+        VALUES ($1, $2, $3::text[], $4::text[], $5)
         RETURNING *
       `,
-      [input.name, input.includeKeywords, input.excludeKeywords, input.isActive],
+      [input.tenantId, input.name, input.includeKeywords, input.excludeKeywords, input.isActive],
     );
 
     return mapRule(result.rows[0]);
   }
 
-  async list(input: { page: number; pageSize: number; isActive?: boolean; query?: string }): Promise<{ items: Rule[]; total: number }> {
-    const where: string[] = [];
-    const values: unknown[] = [];
+  async list(input: { tenantId: string; page: number; pageSize: number; isActive?: boolean; query?: string }): Promise<{ items: Rule[]; total: number }> {
+    const where: string[] = [`tenant_id = $1`];
+    const values: unknown[] = [input.tenantId];
 
     if (typeof input.isActive === 'boolean') {
       where.push(`is_active = $${values.length + 1}`);
@@ -74,24 +75,27 @@ export class RulesRepository {
     };
   }
 
-  async listActive(): Promise<Rule[]> {
-    const result = await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE is_active = true ORDER BY id ASC');
+  async listActive(tenantId?: string): Promise<Rule[]> {
+    const result = tenantId
+      ? await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE tenant_id = $1 AND is_active = true ORDER BY id ASC', [tenantId])
+      : await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE is_active = true ORDER BY id ASC');
     return result.rows.map(mapRule);
   }
 
-  async findByName(name: string): Promise<Rule | null> {
-    const result = await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE name = $1 LIMIT 1', [name]);
+  async findByName(name: string, tenantId: string): Promise<Rule | null> {
+    const result = await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE tenant_id = $1 AND name = $2 LIMIT 1', [tenantId, name]);
     return result.rows[0] ? mapRule(result.rows[0]) : null;
   }
 
-  async upsertByName(input: { name: string; includeKeywords: string[]; excludeKeywords: string[]; isActive: boolean }): Promise<Rule> {
-    const existing = await this.findByName(input.name);
+  async upsertByName(input: { tenantId: string; name: string; includeKeywords: string[]; excludeKeywords: string[]; isActive: boolean }): Promise<Rule> {
+    const existing = await this.findByName(input.name, input.tenantId);
     if (!existing) {
       return this.create(input);
     }
 
     const updated = await this.update({
       id: existing.id,
+      tenantId: input.tenantId,
       includeKeywords: input.includeKeywords,
       excludeKeywords: input.excludeKeywords,
       isActive: input.isActive,
@@ -104,19 +108,22 @@ export class RulesRepository {
     return updated;
   }
 
-  async findById(id: number): Promise<Rule | null> {
-    const result = await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE id = $1', [id]);
+  async findById(id: number, tenantId?: string): Promise<Rule | null> {
+    const result = tenantId
+      ? await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE tenant_id = $1 AND id = $2', [tenantId, id])
+      : await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE id = $1', [id]);
     return result.rows[0] ? mapRule(result.rows[0]) : null;
   }
 
   async update(input: {
+    tenantId?: string;
     id: number;
     name?: string;
     includeKeywords?: string[];
     excludeKeywords?: string[];
     isActive?: boolean;
   }): Promise<Rule | null> {
-    const current = await this.findById(input.id);
+    const current = await this.findById(input.id, input.tenantId);
 
     if (!current) {
       return null;
@@ -131,6 +138,7 @@ export class RulesRepository {
             is_active = $5,
             updated_at = NOW()
         WHERE id = $1
+          AND ($6::text IS NULL OR tenant_id = $6)
         RETURNING *
       `,
       [
@@ -139,14 +147,15 @@ export class RulesRepository {
         input.includeKeywords ?? current.includeKeywords,
         input.excludeKeywords ?? current.excludeKeywords,
         input.isActive ?? current.isActive,
+        input.tenantId ?? null,
       ],
     );
 
     return result.rows[0] ? mapRule(result.rows[0]) : null;
   }
 
-  async disable(id: number): Promise<boolean> {
-    const updated = await this.update({ id, isActive: false });
+  async disable(id: number, tenantId?: string): Promise<boolean> {
+    const updated = await this.update({ id, isActive: false, tenantId });
     return Boolean(updated);
   }
 }

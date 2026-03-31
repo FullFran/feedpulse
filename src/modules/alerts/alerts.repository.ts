@@ -97,8 +97,10 @@ export class AlertsRepository {
     for (const match of matches) {
       const result = await executor.query<{ id: string }>(
         `
-          INSERT INTO alerts (entry_id, rule_id)
-          VALUES ($1, $2)
+          INSERT INTO alerts (tenant_id, entry_id, rule_id)
+          SELECT e.tenant_id, $1::bigint, $2::int
+          FROM entries e
+          WHERE e.id = $1::bigint
           ON CONFLICT DO NOTHING
           RETURNING id
         `,
@@ -117,9 +119,9 @@ export class AlertsRepository {
     return created;
   }
 
-  async list(input: { page: number; pageSize: number; sent?: boolean }): Promise<{ items: AlertView[]; total: number }> {
-    const where: string[] = [];
-    const values: unknown[] = [];
+  async list(input: { tenantId: string; page: number; pageSize: number; sent?: boolean }): Promise<{ items: AlertView[]; total: number }> {
+    const where: string[] = ['a.tenant_id = $1'];
+    const values: unknown[] = [input.tenantId];
 
     if (typeof input.sent === 'boolean') {
       where.push(`a.sent = $${values.length + 1}`);
@@ -166,8 +168,36 @@ export class AlertsRepository {
     };
   }
 
-  async findById(id: number): Promise<AlertNotificationRecord | null> {
-    const result = await this.databaseService.query<AlertRow>(
+  async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord | null> {
+    const result = tenantId
+      ? await this.databaseService.query<AlertRow>(
+      `
+        SELECT a.id,
+               a.sent,
+               a.sent_at,
+               a.delivery_status,
+               a.delivery_attempts,
+               a.last_delivery_attempt_at,
+               a.last_delivery_error,
+               a.last_delivery_queued_at,
+               a.created_at,
+               e.id AS entry_id,
+               e.title AS entry_title,
+               e.link AS entry_link,
+               e.content AS entry_content,
+               r.id AS rule_id,
+               r.name AS rule_name,
+               r.include_keywords AS rule_include_keywords,
+               r.exclude_keywords AS rule_exclude_keywords
+        FROM alerts a
+        INNER JOIN entries e ON e.id = a.entry_id
+        INNER JOIN rules r ON r.id = a.rule_id
+        WHERE a.id = $1
+          AND a.tenant_id = $2
+      `,
+      [id, tenantId],
+    )
+      : await this.databaseService.query<AlertRow>(
       `
         SELECT a.id,
                a.sent,

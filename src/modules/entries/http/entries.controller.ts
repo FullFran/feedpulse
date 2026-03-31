@@ -5,6 +5,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { paginatedResponse } from '../../../shared/http/response';
 import { ApiEnvelopeResponse, ApiStandardErrorResponses } from '../../../shared/http/swagger';
 import { EntryModel } from '../../../shared/http/swagger.models';
+import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context';
 
 import { ListEntriesUseCase } from '../application/list-entries.use-case';
 import { ListEntriesQueryDto } from '../dto/list-entries.query';
@@ -19,7 +20,9 @@ export class EntriesController {
   @ApiEnvelopeResponse(EntryModel, { status: 200, description: 'Entry list returned successfully.', isArray: true, paginated: true })
   @ApiStandardErrorResponses()
   async list(@Req() request: Request, @Query() query: ListEntriesQueryDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     const result = await this.listEntriesUseCase.execute({
+      tenantId,
       page: query.page,
       pageSize: query.page_size,
       feedId: query.feed_id,

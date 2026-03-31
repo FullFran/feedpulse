@@ -6,8 +6,8 @@ import { OpmlImportsRepository } from '../opml-imports.repository';
 export class GetOpmlPreviewUseCase {
   constructor(private readonly opmlImportsRepository: OpmlImportsRepository) {}
 
-  async execute(input: { importId: number; page: number; pageSize: number }) {
-    const summary = await this.opmlImportsRepository.getImportOrThrow(input.importId);
+  async execute(input: { tenantId?: string; importId: number; page: number; pageSize: number }) {
+    const summary = await this.opmlImportsRepository.getImportOrThrow(input.importId, input.tenantId ?? 'legacy');
     const preview = await this.opmlImportsRepository.listPreviewItems(input.importId, input.page, input.pageSize);
 
     return {

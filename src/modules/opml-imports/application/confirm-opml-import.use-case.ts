@@ -14,8 +14,8 @@ export class ConfirmOpmlImportUseCase {
     @Inject(OPML_APPLY_IMPORT_QUEUE_TOKEN) private readonly opmlApplyImportQueue: OpmlApplyImportQueuePort,
   ) {}
 
-  async execute(importId: number): Promise<{ id: string; status: 'queued' | 'already_confirmed' }> {
-    const current = await this.opmlImportsRepository.getImportOrThrow(importId);
+  async execute(importId: number, tenantId = 'legacy'): Promise<{ id: string; status: 'queued' | 'already_confirmed' }> {
+    const current = await this.opmlImportsRepository.getImportOrThrow(importId, tenantId);
 
     if (current.status === 'importing' || current.status === 'completed') {
       return { id: current.id, status: 'already_confirmed' };

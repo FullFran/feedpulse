@@ -6,8 +6,8 @@ import { FeedsRepository } from '../feeds.repository';
 export class DisableFeedUseCase {
   constructor(private readonly feedsRepository: FeedsRepository) {}
 
-  async execute(id: number): Promise<void> {
-    const disabled = await this.feedsRepository.disable(id);
+  async execute(id: number, tenantId: string): Promise<void> {
+    const disabled = await this.feedsRepository.disable(id, tenantId);
 
     if (!disabled) {
       throw new NotFoundException('feed_not_found');

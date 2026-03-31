@@ -1,5 +1,6 @@
 export interface Feed {
   id: number;
+  tenantId: string;
   url: string;
   status: 'active' | 'paused' | 'error';
   etag: string | null;

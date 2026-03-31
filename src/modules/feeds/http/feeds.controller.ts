@@ -5,6 +5,7 @@ import { ApiNoContentResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/s
 import { paginatedResponse, successResponse } from '../../../shared/http/response';
 import { ApiEnvelopeResponse, ApiStandardErrorResponses } from '../../../shared/http/swagger';
 import { FeedCheckNowResultModel, FeedModel } from '../../../shared/http/swagger.models';
+import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context';
 
 import { CheckFeedNowUseCase } from '../application/check-feed-now.use-case';
 import { DisableFeedUseCase } from '../application/disable-feed.use-case';
@@ -33,7 +34,9 @@ export class FeedsController {
   @ApiEnvelopeResponse(FeedModel, { status: 201, description: 'Feed created successfully.' })
   @ApiStandardErrorResponses()
   async create(@Req() request: Request, @Body() payload: CreateFeedDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     const feed = await this.registerFeedUseCase.execute({
+      tenantId,
       url: payload.url,
       pollIntervalSeconds: payload.poll_interval_seconds,
       status: payload.status,
@@ -47,7 +50,9 @@ export class FeedsController {
   @ApiEnvelopeResponse(FeedModel, { status: 200, description: 'Feed list returned successfully.', isArray: true, paginated: true })
   @ApiStandardErrorResponses()
   async list(@Req() request: Request, @Query() query: ListFeedsQueryDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     const result = await this.listFeedsUseCase.execute({
+      tenantId,
       status: query.status,
       query: query.q,
       page: query.page,
@@ -63,7 +68,8 @@ export class FeedsController {
   @ApiEnvelopeResponse(FeedModel, { status: 200, description: 'Feed returned successfully.' })
   @ApiStandardErrorResponses()
   async getById(@Req() request: Request, @Param('id', ParseIntPipe) id: number) {
-    return successResponse(request, await this.getFeedUseCase.execute(id));
+    const tenantId = resolveTenantIdFromRequest(request);
+    return successResponse(request, await this.getFeedUseCase.execute(id, tenantId));
   }
 
   @Patch(':id')
@@ -72,9 +78,11 @@ export class FeedsController {
   @ApiEnvelopeResponse(FeedModel, { status: 200, description: 'Feed updated successfully.' })
   @ApiStandardErrorResponses()
   async update(@Req() request: Request, @Param('id', ParseIntPipe) id: number, @Body() payload: UpdateFeedDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     return successResponse(
       request,
       await this.updateFeedUseCase.execute({
+        tenantId,
         id,
         status: payload.status,
         pollIntervalSeconds: payload.poll_interval_seconds,
@@ -89,7 +97,8 @@ export class FeedsController {
   @ApiEnvelopeResponse(FeedCheckNowResultModel, { status: 202, description: 'Feed check was queued successfully.' })
   @ApiStandardErrorResponses()
   async checkNow(@Req() request: Request, @Param('id', ParseIntPipe) id: number) {
-    return successResponse(request, await this.checkFeedNowUseCase.execute(id));
+    const tenantId = resolveTenantIdFromRequest(request);
+    return successResponse(request, await this.checkFeedNowUseCase.execute(id, tenantId));
   }
 
   @Delete(':id')
@@ -98,7 +107,8 @@ export class FeedsController {
   @ApiParam({ name: 'id', type: Number, example: 101 })
   @ApiNoContentResponse({ description: 'Feed was disabled successfully.' })
   @ApiStandardErrorResponses()
-  async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    await this.disableFeedUseCase.execute(id);
+  async remove(@Req() request: Request, @Param('id', ParseIntPipe) id: number): Promise<void> {
+    const tenantId = resolveTenantIdFromRequest(request);
+    await this.disableFeedUseCase.execute(id, tenantId);
   }
 }

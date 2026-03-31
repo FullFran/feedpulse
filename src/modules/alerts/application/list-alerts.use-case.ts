@@ -6,7 +6,7 @@ import { AlertsRepository } from '../alerts.repository';
 export class ListAlertsUseCase {
   constructor(private readonly alertsRepository: AlertsRepository) {}
 
-  execute(input: { page: number; pageSize: number; sent?: boolean }) {
+  execute(input: { tenantId: string; page: number; pageSize: number; sent?: boolean }) {
     return this.alertsRepository.list(input);
   }
 }

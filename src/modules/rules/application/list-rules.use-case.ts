@@ -6,7 +6,7 @@ import { RulesRepository } from '../rules.repository';
 export class ListRulesUseCase {
   constructor(private readonly rulesRepository: RulesRepository) {}
 
-  execute(input: { page: number; pageSize: number; isActive?: boolean; query?: string }) {
+  execute(input: { tenantId: string; page: number; pageSize: number; isActive?: boolean; query?: string }) {
     return this.rulesRepository.list(input);
   }
 }

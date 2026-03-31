@@ -96,17 +96,21 @@ async function bootstrapSchema(pool: { query: (sql: string, params?: unknown[]) 
   const schema = [
     `CREATE TABLE feeds (
       id SERIAL PRIMARY KEY,
-      url TEXT NOT NULL UNIQUE,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
+      url TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
       next_check_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       poll_interval_seconds INT NOT NULL DEFAULT 1800,
       normalized_url_hash TEXT
     )`,
-    `CREATE UNIQUE INDEX idx_feeds_normalized_url_hash_unique
-      ON feeds (normalized_url_hash)
+    `CREATE UNIQUE INDEX idx_feeds_tenant_url_unique
+      ON feeds (tenant_id, url)`,
+    `CREATE UNIQUE INDEX idx_feeds_tenant_normalized_url_hash_unique
+      ON feeds (tenant_id, normalized_url_hash)
       WHERE normalized_url_hash IS NOT NULL`,
     `CREATE TABLE opml_imports (
       id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       status TEXT NOT NULL CHECK (status IN ('uploaded', 'parsing', 'preview_ready', 'importing', 'completed', 'failed_validation', 'failed')),
       file_name TEXT NOT NULL,
       file_size_bytes BIGINT NOT NULL CHECK (file_size_bytes >= 0),
@@ -126,6 +130,7 @@ async function bootstrapSchema(pool: { query: (sql: string, params?: unknown[]) 
     )`,
     `CREATE TABLE opml_import_items (
       id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       import_id BIGINT NOT NULL REFERENCES opml_imports(id) ON DELETE CASCADE,
       title TEXT,
       outline_path TEXT,

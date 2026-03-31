@@ -17,6 +17,7 @@ import { Request } from 'express';
 
 import { paginatedResponse, successResponse } from '../../../shared/http/response';
 import { ApiStandardErrorResponses } from '../../../shared/http/swagger';
+import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context';
 
 import { ConfirmOpmlImportUseCase } from '../application/confirm-opml-import.use-case';
 import { CreateOpmlImportUseCase } from '../application/create-opml-import.use-case';
@@ -40,11 +41,13 @@ export class OpmlImportsController {
   @ApiStandardErrorResponses()
   @UseInterceptors(FileInterceptor('file'))
   async upload(@Req() request: Request, @UploadedFile() file?: { originalname: string; mimetype: string; buffer: Buffer }) {
+    const tenantId = resolveTenantIdFromRequest(request);
     if (!file) {
       throw new BadRequestException('opml_file_required');
     }
 
     const created = await this.createOpmlImportUseCase.execute({
+      tenantId,
       fileName: file.originalname,
       mimeType: file.mimetype,
       content: file.buffer,
@@ -58,7 +61,9 @@ export class OpmlImportsController {
   @ApiParam({ name: 'id', type: Number, example: 1 })
   @ApiStandardErrorResponses()
   async preview(@Req() request: Request, @Param('id', ParseIntPipe) id: number, @Query() query: OpmlPreviewQueryDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     const result = await this.getOpmlPreviewUseCase.execute({
+      tenantId,
       importId: id,
       page: query.page,
       pageSize: query.page_size,
@@ -76,7 +81,8 @@ export class OpmlImportsController {
   @ApiParam({ name: 'id', type: Number, example: 1 })
   @ApiStandardErrorResponses()
   async confirm(@Req() request: Request, @Param('id', ParseIntPipe) id: number) {
-    return successResponse(request, await this.confirmOpmlImportUseCase.execute(id));
+    const tenantId = resolveTenantIdFromRequest(request);
+    return successResponse(request, await this.confirmOpmlImportUseCase.execute(id, tenantId));
   }
 
   @Get(':id/status')
@@ -84,6 +90,7 @@ export class OpmlImportsController {
   @ApiParam({ name: 'id', type: Number, example: 1 })
   @ApiStandardErrorResponses()
   async status(@Req() request: Request, @Param('id', ParseIntPipe) id: number) {
-    return successResponse(request, await this.getOpmlImportStatusUseCase.execute(id));
+    const tenantId = resolveTenantIdFromRequest(request);
+    return successResponse(request, await this.getOpmlImportStatusUseCase.execute(id, tenantId));
   }
 }

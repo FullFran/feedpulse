@@ -9,6 +9,7 @@ type QueryExecutor = Pick<DatabaseService, 'query'>;
 
 interface FeedRow {
   id: number;
+  tenant_id: string;
   url: string;
   status: 'active' | 'paused' | 'error';
   etag: string | null;
@@ -27,6 +28,7 @@ interface FeedRow {
 function mapFeed(row: FeedRow): Feed {
   return {
     id: row.id,
+    tenantId: row.tenant_id,
     url: row.url,
     status: row.status,
     etag: row.etag,
@@ -47,17 +49,17 @@ function mapFeed(row: FeedRow): Feed {
 export class FeedsRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
-  async create(input: { url: string; pollIntervalSeconds: number; status: 'active' | 'paused' | 'error' }): Promise<Feed> {
+  async create(input: { tenantId: string; url: string; pollIntervalSeconds: number; status: 'active' | 'paused' | 'error' }): Promise<Feed> {
     const normalizedUrlHash = this.buildNormalizedUrlHashOrNull(input.url);
 
     try {
       const result = await this.databaseService.query<FeedRow>(
         `
-          INSERT INTO feeds (url, normalized_url_hash, poll_interval_seconds, status, next_check_at)
-          VALUES ($1, $2, $3, $4, NOW())
+          INSERT INTO feeds (tenant_id, url, normalized_url_hash, poll_interval_seconds, status, next_check_at)
+          VALUES ($1, $2, $3, $4, $5, NOW())
           RETURNING *
         `,
-        [input.url, normalizedUrlHash, input.pollIntervalSeconds, input.status],
+        [input.tenantId, input.url, normalizedUrlHash, input.pollIntervalSeconds, input.status],
       );
 
       return mapFeed(result.rows[0]);
@@ -79,13 +81,14 @@ export class FeedsRepository {
   }
 
   async list(filters: {
+    tenantId: string;
     status?: string;
     query?: string;
     page: number;
     pageSize: number;
   }): Promise<{ items: Feed[]; total: number }> {
-    const where: string[] = [];
-    const values: unknown[] = [];
+    const where: string[] = [`tenant_id = $1`];
+    const values: unknown[] = [filters.tenantId];
 
     if (filters.status) {
       where.push(`status = $${values.length + 1}`);
@@ -157,13 +160,15 @@ export class FeedsRepository {
     );
   }
 
-  async findById(id: number): Promise<Feed | null> {
-    const result = await this.databaseService.query<FeedRow>('SELECT * FROM feeds WHERE id = $1', [id]);
+  async findById(id: number, tenantId?: string): Promise<Feed | null> {
+    const result = tenantId
+      ? await this.databaseService.query<FeedRow>('SELECT * FROM feeds WHERE id = $1 AND tenant_id = $2', [id, tenantId])
+      : await this.databaseService.query<FeedRow>('SELECT * FROM feeds WHERE id = $1', [id]);
     return result.rows[0] ? mapFeed(result.rows[0]) : null;
   }
 
-  async update(input: { id: number; status?: 'active' | 'paused' | 'error'; pollIntervalSeconds?: number }): Promise<Feed | null> {
-    const current = await this.findById(input.id);
+  async update(input: { tenantId?: string; id: number; status?: 'active' | 'paused' | 'error'; pollIntervalSeconds?: number }): Promise<Feed | null> {
+    const current = await this.findById(input.id, input.tenantId);
 
     if (!current) {
       return null;
@@ -186,17 +191,18 @@ export class FeedsRepository {
             poll_interval_seconds = $3,
             next_check_at = $4,
             updated_at = NOW()
-        WHERE id = $1
-        RETURNING *
-      `,
-      [input.id, status, pollIntervalSeconds, nextCheckAt],
+         WHERE id = $1
+           AND ($5::text IS NULL OR tenant_id = $5)
+         RETURNING *
+       `,
+      [input.id, status, pollIntervalSeconds, nextCheckAt, input.tenantId ?? null],
     );
 
     return result.rows[0] ? mapFeed(result.rows[0]) : null;
   }
 
-  async disable(id: number): Promise<boolean> {
-    const updated = await this.update({ id, status: 'paused' });
+  async disable(id: number, tenantId?: string): Promise<boolean> {
+    const updated = await this.update({ id, status: 'paused', tenantId });
     return Boolean(updated);
   }
 

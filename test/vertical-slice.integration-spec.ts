@@ -146,7 +146,8 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
     `CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW())`,
     `CREATE TABLE feeds (
       id SERIAL PRIMARY KEY,
-      url TEXT NOT NULL UNIQUE,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
+      url TEXT NOT NULL,
       normalized_url_hash TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       etag TEXT,
@@ -161,9 +162,11 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
-    `CREATE UNIQUE INDEX idx_feeds_normalized_url_hash_unique ON feeds (normalized_url_hash) WHERE normalized_url_hash IS NOT NULL`,
+    `CREATE UNIQUE INDEX idx_feeds_tenant_url_unique ON feeds (tenant_id, url)`,
+    `CREATE UNIQUE INDEX idx_feeds_tenant_hash_unique ON feeds (tenant_id, normalized_url_hash) WHERE normalized_url_hash IS NOT NULL`,
     `CREATE TABLE entries (
       id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       feed_id INT NOT NULL REFERENCES feeds(id),
       title TEXT,
       link TEXT,
@@ -180,6 +183,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
     `CREATE TABLE fetch_logs (
       id BIGSERIAL PRIMARY KEY,
       feed_id INT NOT NULL REFERENCES feeds(id),
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       status_code INT,
       response_time_ms INT,
       error BOOLEAN NOT NULL DEFAULT FALSE,
@@ -188,6 +192,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
     )`,
     `CREATE TABLE rules (
       id SERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       name TEXT NOT NULL,
       include_keywords TEXT[] NOT NULL,
       exclude_keywords TEXT[] NOT NULL DEFAULT '{}',
@@ -197,6 +202,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
     )`,
     `CREATE TABLE alerts (
       id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       entry_id BIGINT NOT NULL REFERENCES entries(id),
       rule_id INT NOT NULL REFERENCES rules(id),
       sent BOOLEAN NOT NULL DEFAULT FALSE,
@@ -211,6 +217,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
     )`,
     `CREATE TABLE opml_imports (
       id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       status TEXT NOT NULL CHECK (status IN ('uploaded', 'parsing', 'preview_ready', 'importing', 'completed', 'failed_validation', 'failed')),
       file_name TEXT NOT NULL,
       file_size_bytes BIGINT NOT NULL CHECK (file_size_bytes >= 0),
@@ -230,6 +237,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
     )`,
     `CREATE TABLE opml_import_items (
       id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       import_id BIGINT NOT NULL REFERENCES opml_imports(id) ON DELETE CASCADE,
       title TEXT,
       outline_path TEXT,

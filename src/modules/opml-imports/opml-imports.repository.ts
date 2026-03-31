@@ -49,6 +49,7 @@ export interface OpmlImportPreviewItem {
 
 interface OpmlImportRow {
   id: string;
+  tenant_id: string;
   status: OpmlImportStatus;
   file_name: string;
   file_size_bytes: string;
@@ -117,26 +118,37 @@ function mapPreviewItem(row: OpmlImportItemRow): OpmlImportPreviewItem {
 export class OpmlImportsRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
-  async createImport(input: { fileName: string; fileSizeBytes: number; sourceChecksum: string }): Promise<OpmlImportSummary> {
+  async getImportTenantId(importId: number, executor: QueryExecutor = this.databaseService): Promise<string> {
+    const result = await executor.query<{ tenant_id: string }>('SELECT tenant_id FROM opml_imports WHERE id = $1', [importId]);
+    const row = result.rows[0];
+    if (!row) {
+      throw new NotFoundException('opml_import_not_found');
+    }
+    return row.tenant_id;
+  }
+
+  async createImport(input: { tenantId: string; fileName: string; fileSizeBytes: number; sourceChecksum: string }): Promise<OpmlImportSummary> {
     const result = await this.databaseService.query<OpmlImportRow>(
       `
-        INSERT INTO opml_imports (status, file_name, file_size_bytes, source_checksum)
-        VALUES ('uploaded', $1, $2, $3)
+        INSERT INTO opml_imports (tenant_id, status, file_name, file_size_bytes, source_checksum)
+        VALUES ($1, 'uploaded', $2, $3, $4)
         RETURNING *
       `,
-      [input.fileName, input.fileSizeBytes, input.sourceChecksum],
+      [input.tenantId, input.fileName, input.fileSizeBytes, input.sourceChecksum],
     );
 
     return mapImport(result.rows[0]);
   }
 
-  async findImportById(importId: number, executor: QueryExecutor = this.databaseService): Promise<OpmlImportSummary | null> {
-    const result = await executor.query<OpmlImportRow>('SELECT * FROM opml_imports WHERE id = $1', [importId]);
+  async findImportById(importId: number, tenantId?: string, executor: QueryExecutor = this.databaseService): Promise<OpmlImportSummary | null> {
+    const result = tenantId
+      ? await executor.query<OpmlImportRow>('SELECT * FROM opml_imports WHERE id = $1 AND tenant_id = $2', [importId, tenantId])
+      : await executor.query<OpmlImportRow>('SELECT * FROM opml_imports WHERE id = $1', [importId]);
     return result.rows[0] ? mapImport(result.rows[0]) : null;
   }
 
-  async getImportOrThrow(importId: number, executor: QueryExecutor = this.databaseService): Promise<OpmlImportSummary> {
-    const found = await this.findImportById(importId, executor);
+  async getImportOrThrow(importId: number, tenantId?: string, executor: QueryExecutor = this.databaseService): Promise<OpmlImportSummary> {
+    const found = await this.findImportById(importId, tenantId, executor);
     if (!found) {
       throw new NotFoundException('opml_import_not_found');
     }
@@ -195,15 +207,16 @@ export class OpmlImportsRepository {
   }
 
   async replaceImportItems(importId: number, items: OpmlImportItemInput[], executor: QueryExecutor = this.databaseService): Promise<void> {
+    const tenantId = await this.getImportTenantId(importId, executor);
     await executor.query('DELETE FROM opml_import_items WHERE import_id = $1', [importId]);
 
     for (const item of items) {
       await executor.query(
         `
-          INSERT INTO opml_import_items (import_id, title, outline_path, source_xml_url, normalized_url, normalized_url_hash, item_status, validation_error)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          INSERT INTO opml_import_items (tenant_id, import_id, title, outline_path, source_xml_url, normalized_url, normalized_url_hash, item_status, validation_error)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `,
-        [importId, item.title, item.outlinePath, item.sourceXmlUrl, item.normalizedUrl, item.normalizedUrlHash, item.itemStatus, item.validationError],
+        [tenantId, importId, item.title, item.outlinePath, item.sourceXmlUrl, item.normalizedUrl, item.normalizedUrlHash, item.itemStatus, item.validationError],
       );
     }
   }

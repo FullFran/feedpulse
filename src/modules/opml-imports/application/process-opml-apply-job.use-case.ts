@@ -29,6 +29,7 @@ export class ProcessOpmlApplyJobUseCase {
 
   async execute(job: OpmlApplyImportJobData): Promise<void> {
     const current = await this.opmlImportsRepository.getImportOrThrow(job.importId);
+    const tenantId = await this.opmlImportsRepository.getImportTenantId(job.importId);
     if (current.status === 'completed') {
       return;
     }
@@ -57,7 +58,7 @@ export class ProcessOpmlApplyJobUseCase {
         }
 
         try {
-          const upsert = await this.upsertFeed(item.normalizedUrl, client);
+          const upsert = await this.upsertFeed(tenantId, item.normalizedUrl, client);
           if (upsert.collision) {
             await this.opmlImportsRepository.markItemFailed(Number(item.id), 'normalized_hash_collision_detected', client);
             failedItems += 1;
@@ -125,18 +126,18 @@ export class ProcessOpmlApplyJobUseCase {
     }
   }
 
-  private async upsertFeed(normalizedUrl: string, executor: Pick<DatabaseService, 'query'>): Promise<{ feedId: number; created: boolean; collision: boolean }> {
+  private async upsertFeed(tenantId: string, normalizedUrl: string, executor: Pick<DatabaseService, 'query'>): Promise<{ feedId: number; created: boolean; collision: boolean }> {
     const normalizedHash = buildNormalizedFeedUrlHash(normalizedUrl);
 
     const jitterSeconds = Math.floor(Math.random() * Math.max(1, this.appConfigService.opmlInitialJitterMaxSeconds));
     const insertResult = await executor.query<FeedUpsertRow>(
       `
-        INSERT INTO feeds (url, normalized_url_hash, poll_interval_seconds, status, next_check_at)
-        VALUES ($1, $2, 1800, 'active', NOW() + ($3::text || ' seconds')::interval)
+        INSERT INTO feeds (tenant_id, url, normalized_url_hash, poll_interval_seconds, status, next_check_at)
+        VALUES ($1, $2, $3, 1800, 'active', NOW() + ($4::text || ' seconds')::interval)
         ON CONFLICT DO NOTHING
         RETURNING id, url
       `,
-      [normalizedUrl, normalizedHash, jitterSeconds],
+      [tenantId, normalizedUrl, normalizedHash, jitterSeconds],
     );
 
     if (insertResult.rows[0]) {
@@ -147,11 +148,12 @@ export class ProcessOpmlApplyJobUseCase {
       `
         SELECT id, url
         FROM feeds
-        WHERE normalized_url_hash = $1 OR url = $2
-        ORDER BY CASE WHEN normalized_url_hash = $1 THEN 0 ELSE 1 END
+        WHERE tenant_id = $1
+          AND (normalized_url_hash = $2 OR url = $3)
+        ORDER BY CASE WHEN normalized_url_hash = $2 THEN 0 ELSE 1 END
         LIMIT 1
       `,
-      [normalizedHash, normalizedUrl],
+      [tenantId, normalizedHash, normalizedUrl],
     );
 
     const existing = existingResult.rows[0];

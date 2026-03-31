@@ -5,6 +5,7 @@ import { ApiNoContentResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/s
 import { paginatedResponse, successResponse } from '../../../shared/http/response';
 import { ApiEnvelopeResponse, ApiStandardErrorResponses } from '../../../shared/http/swagger';
 import { RuleModel } from '../../../shared/http/swagger.models';
+import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context';
 
 import { CreateRuleUseCase } from '../application/create-rule.use-case';
 import { DisableRuleUseCase } from '../application/disable-rule.use-case';
@@ -31,7 +32,9 @@ export class RulesController {
   @ApiEnvelopeResponse(RuleModel, { status: 201, description: 'Rule created successfully.' })
   @ApiStandardErrorResponses()
   async create(@Req() request: Request, @Body() payload: CreateRuleDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     const rule = await this.createRuleUseCase.execute({
+      tenantId,
       name: payload.name,
       includeKeywords: payload.include_keywords,
       excludeKeywords: payload.exclude_keywords,
@@ -46,7 +49,9 @@ export class RulesController {
   @ApiEnvelopeResponse(RuleModel, { status: 200, description: 'Rule list returned successfully.', isArray: true, paginated: true })
   @ApiStandardErrorResponses()
   async list(@Req() request: Request, @Query() query: ListRulesQueryDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     const result = await this.listRulesUseCase.execute({
+      tenantId,
       page: query.page,
       pageSize: query.page_size,
       isActive: query.is_active,
@@ -62,7 +67,8 @@ export class RulesController {
   @ApiEnvelopeResponse(RuleModel, { status: 200, description: 'Rule returned successfully.' })
   @ApiStandardErrorResponses()
   async getById(@Req() request: Request, @Param('id', ParseIntPipe) id: number) {
-    return successResponse(request, await this.getRuleUseCase.execute(id));
+    const tenantId = resolveTenantIdFromRequest(request);
+    return successResponse(request, await this.getRuleUseCase.execute(id, tenantId));
   }
 
   @Patch(':id')
@@ -71,9 +77,11 @@ export class RulesController {
   @ApiEnvelopeResponse(RuleModel, { status: 200, description: 'Rule updated successfully.' })
   @ApiStandardErrorResponses()
   async update(@Req() request: Request, @Param('id', ParseIntPipe) id: number, @Body() payload: UpdateRuleDto) {
+    const tenantId = resolveTenantIdFromRequest(request);
     return successResponse(
       request,
       await this.updateRuleUseCase.execute({
+        tenantId,
         id,
         name: payload.name,
         includeKeywords: payload.include_keywords,
@@ -89,7 +97,8 @@ export class RulesController {
   @ApiParam({ name: 'id', type: Number, example: 7 })
   @ApiNoContentResponse({ description: 'Rule was disabled successfully.' })
   @ApiStandardErrorResponses()
-  async remove(@Param('id', ParseIntPipe) id: number): Promise<void> {
-    await this.disableRuleUseCase.execute(id);
+  async remove(@Req() request: Request, @Param('id', ParseIntPipe) id: number): Promise<void> {
+    const tenantId = resolveTenantIdFromRequest(request);
+    await this.disableRuleUseCase.execute(id, tenantId);
   }
 }

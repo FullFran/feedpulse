@@ -6,8 +6,8 @@ import { OpmlImportsRepository } from '../opml-imports.repository';
 export class GetOpmlImportStatusUseCase {
   constructor(private readonly opmlImportsRepository: OpmlImportsRepository) {}
 
-  async execute(importId: number) {
-    const summary = await this.opmlImportsRepository.getImportOrThrow(importId);
+  async execute(importId: number, tenantId = 'legacy') {
+    const summary = await this.opmlImportsRepository.getImportOrThrow(importId, tenantId);
     const grouped = await this.opmlImportsRepository.countItemsByStatus(importId);
 
     return {

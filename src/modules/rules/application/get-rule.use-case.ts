@@ -6,8 +6,8 @@ import { RulesRepository } from '../rules.repository';
 export class GetRuleUseCase {
   constructor(private readonly rulesRepository: RulesRepository) {}
 
-  async execute(id: number) {
-    const rule = await this.rulesRepository.findById(id);
+  async execute(id: number, tenantId: string) {
+    const rule = await this.rulesRepository.findById(id, tenantId);
 
     if (!rule) {
       throw new NotFoundException('rule_not_found');

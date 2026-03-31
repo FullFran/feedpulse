@@ -30,6 +30,10 @@ export class ProcessOpmlParseJobUseCase {
 
   async execute(job: OpmlParsePreviewJobData): Promise<void> {
     const current = await this.opmlImportsRepository.getImportOrThrow(job.importId);
+    const tenantId =
+      'getImportTenantId' in this.opmlImportsRepository
+        ? await this.opmlImportsRepository.getImportTenantId(job.importId)
+        : 'legacy';
 
     if (current.status === 'preview_ready' || current.status === 'completed' || current.status === 'importing') {
       return;
@@ -75,6 +79,7 @@ export class ProcessOpmlParseJobUseCase {
         (item): item is OpmlImportItemInput & { normalizedUrlHash: string; normalizedUrl: string } => Boolean(item.normalizedUrlHash && item.normalizedUrl),
       );
       const existingByHash = await this.findExistingFeedsByHash(
+        tenantId,
         normalizedCandidates.map((item) => item.normalizedUrlHash),
         normalizedCandidates.map((item) => item.normalizedUrl),
         client,
@@ -169,7 +174,12 @@ export class ProcessOpmlParseJobUseCase {
     }
   }
 
-  private async findExistingFeedsByHash(hashes: string[], normalizedUrls: string[], executor: Pick<DatabaseService, 'query'>): Promise<Map<string, ExistingFeedRow>> {
+  private async findExistingFeedsByHash(
+    tenantId: string,
+    hashes: string[],
+    normalizedUrls: string[],
+    executor: Pick<DatabaseService, 'query'>,
+  ): Promise<Map<string, ExistingFeedRow>> {
     const uniqueHashes = [...new Set(hashes)];
     const uniqueUrls = [...new Set(normalizedUrls)];
 
@@ -181,10 +191,11 @@ export class ProcessOpmlParseJobUseCase {
       `
         SELECT id, url, normalized_url_hash
         FROM feeds
-        WHERE normalized_url_hash = ANY($1::text[])
-           OR url = ANY($2::text[])
+        WHERE tenant_id = $1
+          AND (normalized_url_hash = ANY($2::text[])
+           OR url = ANY($3::text[]))
       `,
-      [uniqueHashes, uniqueUrls],
+      [tenantId, uniqueHashes, uniqueUrls],
     );
 
     const map = new Map<string, ExistingFeedRow>();

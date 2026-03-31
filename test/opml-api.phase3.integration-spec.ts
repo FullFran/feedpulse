@@ -92,11 +92,14 @@ async function bootstrapSchema(pool: { query: (sql: string) => Promise<unknown> 
   const schema = [
     `CREATE TABLE feeds (
       id SERIAL PRIMARY KEY,
-      url TEXT NOT NULL UNIQUE,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
+      url TEXT NOT NULL,
       normalized_url_hash TEXT
     )`,
+    `CREATE UNIQUE INDEX idx_feeds_tenant_url_unique ON feeds (tenant_id, url)`,
     `CREATE TABLE opml_imports (
       id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       status TEXT NOT NULL CHECK (status IN ('uploaded', 'parsing', 'preview_ready', 'importing', 'completed', 'failed_validation', 'failed')),
       file_name TEXT NOT NULL,
       file_size_bytes BIGINT NOT NULL CHECK (file_size_bytes >= 0),
@@ -116,6 +119,7 @@ async function bootstrapSchema(pool: { query: (sql: string) => Promise<unknown> 
     )`,
     `CREATE TABLE opml_import_items (
       id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL DEFAULT 'legacy',
       import_id BIGINT NOT NULL REFERENCES opml_imports(id) ON DELETE CASCADE,
       title TEXT,
       outline_path TEXT,

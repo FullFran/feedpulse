@@ -6,7 +6,7 @@ import { FeedsRepository } from '../feeds.repository';
 export class ListFeedsUseCase {
   constructor(private readonly feedsRepository: FeedsRepository) {}
 
-  execute(input: { status?: string; query?: string; page: number; pageSize: number }) {
+  execute(input: { tenantId: string; status?: string; query?: string; page: number; pageSize: number }) {
     return this.feedsRepository.list(input);
   }
 }

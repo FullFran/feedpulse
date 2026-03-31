@@ -50,7 +50,7 @@ export class ProcessFeedJobUseCase {
       this.metricsService.observeFetchDuration(response.durationMs);
 
       if (response.statusCode === 304) {
-        await this.recordFetchLog(feed.id, response.statusCode, response.durationMs, false, null);
+        await this.recordFetchLog(feed.id, feed.tenantId, response.statusCode, response.durationMs, false, null);
         await this.feedsRepository.updateAfterFetch({
           feedId: feed.id,
           etag: response.etag,
@@ -86,8 +86,8 @@ export class ProcessFeedJobUseCase {
       const client = await this.databaseService.getPool().connect();
       try {
         await client.query('BEGIN');
-        const insertedEntries = await this.entriesRepository.insertMany(feed.id, normalizedEntries, client);
-        const activeRules = await this.rulesRepository.listActive();
+        const insertedEntries = await this.entriesRepository.insertMany(feed.tenantId, feed.id, normalizedEntries, client);
+        const activeRules = await this.rulesRepository.listActive(feed.tenantId);
         const matches = insertedEntries.flatMap((entry) => {
           const haystack = `${entry.title ?? ''} ${entry.content ?? ''}`.toLowerCase();
 
@@ -101,7 +101,7 @@ export class ProcessFeedJobUseCase {
         });
 
         const createdAlerts = await this.alertsRepository.createForMatches(matches, client);
-        await this.recordFetchLog(feed.id, response.statusCode, response.durationMs, false, null, client);
+        await this.recordFetchLog(feed.id, feed.tenantId, response.statusCode, response.durationMs, false, null, client);
 
         await this.feedsRepository.updateAfterFetch({
           feedId: feed.id,
@@ -131,7 +131,7 @@ export class ProcessFeedJobUseCase {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown fetch failure';
       this.metricsService.incrementFetchErrors();
-      await this.recordFetchLog(feed.id, null, null, true, message);
+      await this.recordFetchLog(feed.id, feed.tenantId, null, null, true, message);
       await this.feedsRepository.updateAfterFetch({
         feedId: feed.id,
         status: 'error',
@@ -156,6 +156,7 @@ export class ProcessFeedJobUseCase {
 
   private async recordFetchLog(
     feedId: number,
+    tenantId: string,
     statusCode: number | null,
     responseTimeMs: number | null,
     error: boolean,
@@ -165,10 +166,10 @@ export class ProcessFeedJobUseCase {
     const executor = client ?? this.databaseService;
     await executor.query(
       `
-        INSERT INTO fetch_logs (feed_id, status_code, response_time_ms, error, error_message)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO fetch_logs (feed_id, tenant_id, status_code, response_time_ms, error, error_message)
+        VALUES ($1, $2, $3, $4, $5, $6)
       `,
-      [feedId, statusCode, responseTimeMs, error, errorMessage],
+      [feedId, tenantId, statusCode, responseTimeMs, error, errorMessage],
     );
   }
 }

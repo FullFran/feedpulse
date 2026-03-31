@@ -13,8 +13,12 @@ export class DeliverAlertUseCase {
     @Inject(ALERT_NOTIFIER) private readonly alertNotifier: AlertNotifierPort,
   ) {}
 
-  async execute(alertId: number, source: 'ingestion' | 'manual' = 'manual'): Promise<{ id: string; status: 'queued' | 'already_sent' | 'disabled' }> {
-    const alert = await this.alertsRepository.findById(alertId);
+  async execute(
+    alertId: number,
+    source: 'ingestion' | 'manual' = 'manual',
+    tenantId?: string,
+  ): Promise<{ id: string; status: 'queued' | 'already_sent' | 'disabled' }> {
+    const alert = await this.alertsRepository.findById(alertId, source === 'manual' ? tenantId : undefined);
 
     if (!alert) {
       throw new NotFoundException('alert_not_found');

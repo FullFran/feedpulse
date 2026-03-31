@@ -7,6 +7,7 @@ export class UpdateRuleUseCase {
   constructor(private readonly rulesRepository: RulesRepository) {}
 
   async execute(input: {
+    tenantId: string;
     id: number;
     name?: string;
     includeKeywords?: string[];

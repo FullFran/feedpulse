@@ -25,11 +25,12 @@ export class CreateOpmlImportUseCase {
     @Inject(AppConfigService) private readonly appConfigService: AppConfigService,
   ) {}
 
-  async execute(input: { fileName: string; mimeType: string; content: Buffer }): Promise<{ id: string; status: string; parseQueued: boolean }> {
+  async execute(input: { tenantId?: string; fileName: string; mimeType: string; content: Buffer }): Promise<{ id: string; status: string; parseQueued: boolean }> {
     this.validateUpload(input);
 
     const sourceChecksum = createHash('sha256').update(input.content).digest('hex');
     const created = await this.opmlImportsRepository.createImport({
+      tenantId: input.tenantId ?? 'legacy',
       fileName: input.fileName,
       fileSizeBytes: input.content.length,
       sourceChecksum,
