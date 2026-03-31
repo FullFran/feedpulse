@@ -6,6 +6,7 @@ import { AlertNotificationPayload, AlertNotifierPort } from '../domain/alert-not
 
 const EMAIL_SUBJECT_MAX_LENGTH = 120;
 const EMAIL_TITLE_MAX_LENGTH = 70;
+const EMAIL_SUMMARY_MAX_LENGTH = 260;
 
 @Injectable()
 export class WebhookAlertNotifier implements AlertNotifierPort {
@@ -74,27 +75,26 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
   private buildAlertEmail(alert: AlertNotificationPayload): { subject: string; text: string; html: string } {
     const title = alert.entry.title ?? '-';
     const link = alert.entry.link ?? '-';
+    const summary = this.summarizeContent(alert.entry.content);
     const includeKeywords = alert.rule.includeKeywords.join(', ') || '-';
-    const excludeKeywords = alert.rule.excludeKeywords.join(', ') || '-';
     const createdAt = this.formatDateEs(alert.createdAt);
 
-    const subjectBase = `Feedpulse: ${alert.rule.name} — ${this.truncate(title, EMAIL_TITLE_MAX_LENGTH)}`;
+    const subjectBase = `Nueva alerta: ${this.truncate(title, EMAIL_TITLE_MAX_LENGTH)}`;
     const subject = this.truncate(subjectBase, EMAIL_SUBJECT_MAX_LENGTH);
 
     const text = [
       'Hola,',
       '',
-      'Se detectó una nueva coincidencia para tu regla de monitoreo.',
+      'Se detectó una noticia nueva que coincide con tu alerta.',
       '',
-      'Resumen de la alerta',
-      '--------------------',
+      'Resumen',
+      '-------',
       `Título: ${title}`,
+      `Entradilla: ${summary}`,
       `Enlace: ${link}`,
       `Regla: ${alert.rule.name}`,
-      `Palabras clave incluidas: ${includeKeywords}`,
-      `Palabras clave excluidas: ${excludeKeywords}`,
+      `Palabras clave: ${includeKeywords}`,
       `Fecha: ${createdAt}`,
-      `Tenant: ${alert.tenantId}`,
       '',
       'Saludos,',
       'Feedpulse',
@@ -102,30 +102,27 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
 
     const titleEscaped = this.escapeHtml(title);
     const linkEscaped = this.escapeHtml(link);
+    const summaryEscaped = this.escapeHtml(summary);
     const ruleEscaped = this.escapeHtml(alert.rule.name);
     const includeEscaped = this.escapeHtml(includeKeywords);
-    const excludeEscaped = this.escapeHtml(excludeKeywords);
     const dateEscaped = this.escapeHtml(createdAt);
-    const tenantEscaped = this.escapeHtml(alert.tenantId);
 
     const html = [
       '<!doctype html>',
       '<html lang="es">',
       '<body style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a;">',
       '<p>Hola,</p>',
-      '<p>Se detectó una nueva coincidencia para tu regla de monitoreo.</p>',
-      '<h2 style="margin:24px 0 12px 0;font-size:18px;">Resumen de la alerta</h2>',
-      '<table style="border-collapse:collapse;">',
-      `<tr><td style="padding:4px 12px 4px 0;"><strong>Título:</strong></td><td>${titleEscaped}</td></tr>`,
-      `<tr><td style="padding:4px 12px 4px 0;"><strong>Enlace:</strong></td><td>${
-        link === '-' ? '-' : `<a href="${linkEscaped}">${linkEscaped}</a>`
-      }</td></tr>`,
-      `<tr><td style="padding:4px 12px 4px 0;"><strong>Regla:</strong></td><td>${ruleEscaped}</td></tr>`,
-      `<tr><td style="padding:4px 12px 4px 0;"><strong>Palabras clave incluidas:</strong></td><td>${includeEscaped}</td></tr>`,
-      `<tr><td style="padding:4px 12px 4px 0;"><strong>Palabras clave excluidas:</strong></td><td>${excludeEscaped}</td></tr>`,
-      `<tr><td style="padding:4px 12px 4px 0;"><strong>Fecha:</strong></td><td>${dateEscaped}</td></tr>`,
-      `<tr><td style="padding:4px 12px 4px 0;"><strong>Tenant:</strong></td><td>${tenantEscaped}</td></tr>`,
-      '</table>',
+      '<p>Se detectó una noticia nueva que coincide con tu alerta.</p>',
+      '<h2 style="margin:22px 0 10px 0;font-size:18px;">Resumen</h2>',
+      `<p style="margin:0 0 8px 0;"><strong>${titleEscaped}</strong></p>`,
+      `<p style="margin:0 0 14px 0;color:#334155;">${summaryEscaped}</p>`,
+      link === '-'
+        ? '<p style="margin:0 0 14px 0;"><strong>Enlace:</strong> -</p>'
+        : `<p style="margin:0 0 14px 0;"><a href="${linkEscaped}" style="display:inline-block;background:#0f172a;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;">Leer noticia</a></p>`,
+      '<hr style="border:none;border-top:1px solid #e2e8f0;margin:14px 0;"/>',
+      `<p style="margin:0 0 4px 0;"><strong>Regla:</strong> ${ruleEscaped}</p>`,
+      `<p style="margin:0 0 4px 0;"><strong>Palabras clave:</strong> ${includeEscaped}</p>`,
+      `<p style="margin:0 0 4px 0;"><strong>Fecha:</strong> ${dateEscaped}</p>`,
       '<p style="margin-top:20px;">Saludos,<br/>Feedpulse</p>',
       '</body>',
       '</html>',
@@ -152,6 +149,19 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
       timeStyle: 'short',
       timeZone: 'UTC',
     }).format(date)} UTC`;
+  }
+
+  private summarizeContent(content: string | null): string {
+    if (!content) {
+      return 'No hay entradilla disponible.';
+    }
+
+    const compact = content.replaceAll(/\s+/g, ' ').trim();
+    if (!compact) {
+      return 'No hay entradilla disponible.';
+    }
+
+    return this.truncate(compact, EMAIL_SUMMARY_MAX_LENGTH);
   }
 
   private escapeHtml(value: string): string {

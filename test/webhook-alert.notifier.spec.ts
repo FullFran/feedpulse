@@ -15,7 +15,7 @@ describe('WebhookAlertNotifier.sendEmail', () => {
       id: 'entry_1',
       title: 'Título de prueba',
       link: 'https://example.com/post-1',
-      content: null,
+      content: 'Entradilla breve de ejemplo para que el correo se entienda mejor.',
     },
     rule: {
       id: 10,
@@ -57,17 +57,16 @@ describe('WebhookAlertNotifier.sendEmail', () => {
     };
 
     expect(payload.to).toEqual(['dev@example.com']);
-    expect(payload.subject).toContain('Feedpulse: Noticias de IA');
-    expect(payload.text).toContain('Resumen de la alerta');
+    expect(payload.subject).toContain('Nueva alerta: Título de prueba');
+    expect(payload.text).toContain('Resumen');
     expect(payload.text).toContain('Título: Título de prueba');
+    expect(payload.text).toContain('Entradilla: Entradilla breve de ejemplo para que el correo se entienda mejor.');
     expect(payload.text).toContain('Enlace: https://example.com/post-1');
     expect(payload.text).toContain('Regla: Noticias de IA');
-    expect(payload.text).toContain('Palabras clave incluidas: ia, llm');
-    expect(payload.text).toContain('Palabras clave excluidas: rumor');
-    expect(payload.text).toContain('Tenant: tenant_demo');
+    expect(payload.text).toContain('Palabras clave: ia, llm');
     expect(payload.html).toContain('<html lang="es">');
-    expect(payload.html).toContain('<strong>Título:</strong>');
-    expect(payload.html).toContain('<strong>Palabras clave incluidas:</strong>');
+    expect(payload.html).toContain('Leer noticia');
+    expect(payload.html).toContain('<strong>Palabras clave:</strong> ia, llm');
   });
 
   it('escapa contenido dinámico en html para evitar inyección de marcado', async () => {
@@ -77,11 +76,11 @@ describe('WebhookAlertNotifier.sendEmail', () => {
     await notifier.sendEmail(
       {
         ...alert,
-        tenantId: 'tenant_<unsafe>',
         entry: {
           ...alert.entry,
           title: '<script>alert(1)</script>',
           link: 'https://evil.test/?q=<tag>&x="1"',
+          content: 'Texto con <b>HTML</b> y <script>malo</script>',
         },
         rule: {
           ...alert.rule,
@@ -98,10 +97,10 @@ describe('WebhookAlertNotifier.sendEmail', () => {
 
     expect(payload.html).not.toContain('<script>alert(1)</script>');
     expect(payload.html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
-    expect(payload.html).toContain('tenant_&lt;unsafe&gt;');
+    expect(payload.html).toContain('Texto con &lt;b&gt;HTML&lt;/b&gt; y &lt;script&gt;malo&lt;/script&gt;');
     expect(payload.html).toContain('Regla &lt;b&gt;peligrosa&lt;/b&gt;');
     expect(payload.html).toContain('&lt;img src=x onerror=1&gt;');
-    expect(payload.html).toContain('&quot;drop&quot;');
+    expect(payload.html).toContain('href="https://evil.test/?q=&lt;tag&gt;&amp;x=&quot;1&quot;"');
   });
 
   it('recorta el asunto cuando el título es demasiado largo', async () => {
