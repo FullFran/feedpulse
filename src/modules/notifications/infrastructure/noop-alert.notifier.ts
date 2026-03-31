@@ -12,7 +12,7 @@ export class NoopAlertNotifier implements AlertNotifierPort {
     return false;
   }
 
-  isTelegramEnabled(): boolean {
+  isTelegramEnabled(_telegramBotToken?: string): boolean {
     return false;
   }
 
@@ -24,7 +24,7 @@ export class NoopAlertNotifier implements AlertNotifierPort {
     return undefined;
   }
 
-  async sendTelegram(_alert: AlertNotificationPayload, _chatId: string): Promise<void> {
+  async sendTelegram(_alert: AlertNotificationPayload, _chatId: string, _telegramBotToken?: string): Promise<void> {
     return undefined;
   }
 

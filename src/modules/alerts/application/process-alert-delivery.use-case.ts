@@ -4,6 +4,7 @@ import { MetricsService } from '../../observability/metrics.service';
 import { ALERT_NOTIFIER, AlertNotifierPort } from '../../notifications/domain/alert-notifier.port';
 import { SettingsRepository } from '../../settings/settings.repository';
 import { DEFAULT_TELEGRAM_DELIVERY_MODE } from '../../settings/settings.types';
+import { TelegramBotTokenResolverService } from '../../settings/telegram-bot-token-resolver.service';
 import { AppConfigService } from '../../../shared/config/app-config.service';
 
 import { AlertsRepository } from '../alerts.repository';
@@ -16,6 +17,7 @@ export class ProcessAlertDeliveryUseCase {
     private readonly alertsRepository: AlertsRepository,
     private readonly metricsService: MetricsService,
     private readonly settingsRepository: SettingsRepository,
+    private readonly telegramBotTokenResolverService: TelegramBotTokenResolverService,
     private readonly appConfigService: AppConfigService,
     @Inject(ALERT_NOTIFIER) private readonly alertNotifier: AlertNotifierPort,
   ) {}
@@ -36,11 +38,12 @@ export class ProcessAlertDeliveryUseCase {
     const recipientEmails = tenantSettings?.recipientEmails ?? [];
     const telegramChatIds = tenantSettings?.telegramChatIds ?? [];
     const telegramDeliveryMode = tenantSettings?.telegramDeliveryMode ?? DEFAULT_TELEGRAM_DELIVERY_MODE;
+    const telegramBotToken = this.telegramBotTokenResolverService.resolveForTenant({ tenantId: alert.tenantId, settings: tenantSettings });
     const shouldSendWebhook = Boolean(notifierUrl);
     const shouldSendEmail = recipientEmails.length > 0 && this.alertNotifier.isEmailEnabled();
-    const shouldSendTelegram = telegramChatIds.length > 0 && this.alertNotifier.isTelegramEnabled() && telegramDeliveryMode === 'instant';
+    const shouldSendTelegram = telegramChatIds.length > 0 && this.alertNotifier.isTelegramEnabled(telegramBotToken) && telegramDeliveryMode === 'instant';
     const shouldQueueTelegramDigest =
-      telegramChatIds.length > 0 && this.alertNotifier.isTelegramEnabled() && telegramDeliveryMode === 'digest_10m';
+      telegramChatIds.length > 0 && this.alertNotifier.isTelegramEnabled(telegramBotToken) && telegramDeliveryMode === 'digest_10m';
 
     if ((!shouldSendWebhook && !shouldSendEmail && !shouldSendTelegram && !shouldQueueTelegramDigest) || !this.alertNotifier.isEnabled()) {
       await this.alertsRepository.markDeliveryDisabled(input.alertId);
@@ -71,7 +74,7 @@ export class ProcessAlertDeliveryUseCase {
       if (shouldSendTelegram) {
         for (const chatId of telegramChatIds) {
           try {
-            await this.alertNotifier.sendTelegram(alert, chatId);
+            await this.alertNotifier.sendTelegram(alert, chatId, telegramBotToken);
           } catch (error) {
             const message = error instanceof Error ? error.message : 'unknown_telegram_failure';
             channelErrors.push(`telegram:${chatId}:${message}`);

@@ -147,7 +147,7 @@ class FakeAlertNotifier implements AlertNotifierPort {
     return false;
   }
 
-  isTelegramEnabled(): boolean {
+  isTelegramEnabled(_telegramBotToken?: string): boolean {
     return false;
   }
 
@@ -164,7 +164,7 @@ class FakeAlertNotifier implements AlertNotifierPort {
     return undefined;
   }
 
-  async sendTelegram(_alert: AlertNotificationPayload, _chatId: string): Promise<void> {
+  async sendTelegram(_alert: AlertNotificationPayload, _chatId: string, _telegramBotToken?: string): Promise<void> {
     return undefined;
   }
 
@@ -182,6 +182,9 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       recipient_emails TEXT[] NOT NULL DEFAULT '{}',
       telegram_chat_ids TEXT[] NOT NULL DEFAULT '{}',
       telegram_delivery_mode TEXT NOT NULL DEFAULT 'instant',
+      telegram_bot_token_ciphertext TEXT,
+      telegram_bot_token_iv TEXT,
+      telegram_bot_token_tag TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,

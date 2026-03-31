@@ -10,6 +10,7 @@ export interface AppConfiguration {
   resendApiKey?: string;
   resendFromEmail?: string;
   telegramBotToken?: string;
+  tenantSecretsMasterKey?: string;
   telegramApiUrl: string;
   schedulerTickMs: number;
   schedulerBatchSize: number;
@@ -41,6 +42,7 @@ export const configuration = (env: Env): AppConfiguration => ({
   resendApiKey: env.RESEND_API_KEY,
   resendFromEmail: env.RESEND_FROM_EMAIL,
   telegramBotToken: env.TELEGRAM_BOT_TOKEN,
+  tenantSecretsMasterKey: env.TENANT_SECRETS_MASTER_KEY,
   telegramApiUrl: env.TELEGRAM_API_URL,
   schedulerTickMs: env.SCHEDULER_TICK_MS,
   schedulerBatchSize: env.SCHEDULER_BATCH_SIZE,

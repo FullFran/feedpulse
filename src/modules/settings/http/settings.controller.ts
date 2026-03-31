@@ -40,12 +40,15 @@ export class SettingsController {
     const recipientEmails = payload.recipient_emails === undefined ? [] : payload.recipient_emails;
     const telegramChatIds = payload.telegram_chat_ids === undefined ? [] : payload.telegram_chat_ids;
     const telegramDeliveryMode = payload.telegram_delivery_mode ?? DEFAULT_TELEGRAM_DELIVERY_MODE;
+    const clearTelegramBotToken = payload.telegram_bot_token_clear ?? false;
     const settings = await this.updateSettingsUseCase.execute({
       tenantId,
       webhookNotifierUrl,
       recipientEmails,
       telegramChatIds,
       telegramDeliveryMode,
+      telegramBotToken: payload.telegram_bot_token,
+      clearTelegramBotToken,
     });
 
     return successResponse(request, settings);

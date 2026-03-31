@@ -22,8 +22,8 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     return Boolean(this.appConfigService.resendApiKey && this.appConfigService.resendFromEmail);
   }
 
-  isTelegramEnabled(): boolean {
-    return Boolean(this.appConfigService.telegramBotToken);
+  isTelegramEnabled(telegramBotToken?: string): boolean {
+    return Boolean(telegramBotToken || this.appConfigService.telegramBotToken);
   }
 
   async sendWebhook(alert: AlertNotificationPayload, destinationUrl: string): Promise<void> {
@@ -78,7 +78,7 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     }
   }
 
-  async sendTelegram(alert: AlertNotificationPayload, chatId: string): Promise<void> {
+  async sendTelegram(alert: AlertNotificationPayload, chatId: string, telegramBotToken?: string): Promise<void> {
     const title = this.truncate(alert.entry.title?.trim() || 'Alerta sin título', TELEGRAM_TITLE_MAX_LENGTH);
     const snippet = this.summarizeTelegramContent(alert.entry.content);
     const lines = [
@@ -88,7 +88,7 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
       alert.entry.link ? `🔗 ${alert.entry.link}` : null,
     ].filter(Boolean) as string[];
 
-    await this.sendTelegramMessage(chatId, lines.join('\n'));
+    await this.sendTelegramMessage(chatId, lines.join('\n'), telegramBotToken);
   }
 
   async sendTelegramDigest(payload: TelegramDigestPayload): Promise<void> {
@@ -110,7 +110,7 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
       lines.push(`…y ${payload.items.length - 12} alerta(s) más.`);
     }
 
-    await this.sendTelegramMessage(payload.chatId, lines.join('\n'));
+    await this.sendTelegramMessage(payload.chatId, lines.join('\n'), payload.telegramBotToken);
   }
 
   private buildAlertEmail(alert: AlertNotificationPayload): { subject: string; text: string; html: string } {
@@ -218,8 +218,8 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     return this.truncate(compact, TELEGRAM_SNIPPET_MAX_LENGTH);
   }
 
-  private async sendTelegramMessage(chatId: string, text: string): Promise<void> {
-    const token = this.appConfigService.telegramBotToken;
+  private async sendTelegramMessage(chatId: string, text: string, telegramBotToken?: string): Promise<void> {
+    const token = telegramBotToken || this.appConfigService.telegramBotToken;
     if (!token) {
       throw new Error('telegram_notifier_disabled');
     }

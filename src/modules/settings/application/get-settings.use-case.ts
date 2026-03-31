@@ -12,6 +12,7 @@ export class GetSettingsUseCase {
     recipientEmails: string[];
     telegramChatIds: string[];
     telegramDeliveryMode: TelegramDeliveryMode;
+    telegramBotTokenConfigured: boolean;
   }> {
     const settings = await this.settingsRepository.getByTenantId(tenantId);
     return {
@@ -19,6 +20,7 @@ export class GetSettingsUseCase {
       recipientEmails: settings?.recipientEmails ?? [],
       telegramChatIds: settings?.telegramChatIds ?? [],
       telegramDeliveryMode: settings?.telegramDeliveryMode ?? DEFAULT_TELEGRAM_DELIVERY_MODE,
+      telegramBotTokenConfigured: settings?.telegramBotTokenConfigured ?? false,
     };
   }
 }

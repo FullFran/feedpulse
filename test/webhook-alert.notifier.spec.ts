@@ -25,7 +25,7 @@ describe('WebhookAlertNotifier.sendEmail', () => {
     },
   };
 
-  function buildNotifier(): WebhookAlertNotifier {
+  function buildNotifier(overrides: Partial<AppConfigService> = {}): WebhookAlertNotifier {
     const appConfigService = {
       resendApiKey: 're_test_x',
       resendFromEmail: 'alerts@example.com',
@@ -33,6 +33,7 @@ describe('WebhookAlertNotifier.sendEmail', () => {
       webhookNotifierUrl: undefined,
       telegramBotToken: 'tg_test_token',
       telegramApiUrl: 'https://api.telegram.test',
+      ...overrides,
     } as AppConfigService;
 
     return new WebhookAlertNotifier(appConfigService);
@@ -161,5 +162,22 @@ describe('WebhookAlertNotifier.sendEmail', () => {
     expect(payload.text).toContain('Resumen de alertas (2)');
     expect(payload.text).toContain('Título A');
     expect(payload.text).toContain('https://example.com/b');
+  });
+
+  it('usa token de tenant cuando se entrega por override', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) } as unknown as Response);
+
+    const notifier = buildNotifier();
+    await notifier.sendTelegram(alert, '-100200', 'tenant_token_override');
+
+    const [url] = (global.fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.telegram.test/bottenant_token_override/sendMessage');
+  });
+
+  it('lanza telegram_notifier_disabled cuando no hay token tenant ni global', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) } as unknown as Response);
+
+    const notifier = buildNotifier({ telegramBotToken: undefined });
+    await expect(notifier.sendTelegram(alert, '-100200')).rejects.toThrow('telegram_notifier_disabled');
   });
 });

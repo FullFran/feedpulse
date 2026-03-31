@@ -169,6 +169,17 @@ th, td {
   font-size: 13px;
 }
 
+.settings-token-state {
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.checkbox-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 textarea {
   border: 1px solid #cbd5e1;
   border-radius: 8px;

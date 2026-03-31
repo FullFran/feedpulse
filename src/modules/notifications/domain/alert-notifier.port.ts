@@ -22,6 +22,7 @@ export interface TelegramDigestPayload {
   tenantId: string;
   chatId: string;
   windowLabel: string;
+  telegramBotToken?: string;
   items: Array<{
     title: string | null;
     snippet: string | null;
@@ -32,10 +33,10 @@ export interface TelegramDigestPayload {
 export interface AlertNotifierPort {
   isEnabled(): boolean;
   isEmailEnabled(): boolean;
-  isTelegramEnabled(): boolean;
+  isTelegramEnabled(telegramBotToken?: string): boolean;
   sendWebhook(alert: AlertNotificationPayload, destinationUrl: string): Promise<void>;
   sendEmail(alert: AlertNotificationPayload, recipientEmails: string[]): Promise<void>;
-  sendTelegram(alert: AlertNotificationPayload, chatId: string): Promise<void>;
+  sendTelegram(alert: AlertNotificationPayload, chatId: string, telegramBotToken?: string): Promise<void>;
   sendTelegramDigest(payload: TelegramDigestPayload): Promise<void>;
 }
 

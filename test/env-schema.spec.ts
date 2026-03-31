@@ -18,6 +18,7 @@ describe('validateEnv', () => {
 
     expect(env.WEBHOOK_NOTIFIER_URL).toBeUndefined();
     expect(env.TELEGRAM_BOT_TOKEN).toBeUndefined();
+    expect(env.TENANT_SECRETS_MASTER_KEY).toBeUndefined();
     expect(env.TELEGRAM_API_URL).toBe('https://api.telegram.org');
   });
 });

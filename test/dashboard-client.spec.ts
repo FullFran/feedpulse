@@ -161,6 +161,9 @@ function createHarness(responses: MockResponse[]) {
     'settings-form',
     'settings-webhook-url',
     'settings-recipient-emails',
+    'settings-telegram-token-status',
+    'settings-telegram-bot-token',
+    'settings-telegram-token-clear',
     'settings-telegram-chat-ids',
     'settings-telegram-mode',
     'settings-save',
@@ -323,6 +326,7 @@ describe('dashboard client', () => {
           data: {
             webhookNotifierUrl: 'https://hooks.example.com/old',
             recipientEmails: ['old@example.com'],
+            telegramBotTokenConfigured: true,
             telegramChatIds: ['-10010'],
             telegramDeliveryMode: 'instant',
           },
@@ -333,6 +337,7 @@ describe('dashboard client', () => {
           data: {
             webhookNotifierUrl: 'https://hooks.example.com/new',
             recipientEmails: ['alerts@example.com', 'ops@example.com'],
+            telegramBotTokenConfigured: true,
             telegramChatIds: ['-10020', '123456'],
             telegramDeliveryMode: 'digest_10m',
           },
@@ -343,6 +348,7 @@ describe('dashboard client', () => {
           data: {
             webhookNotifierUrl: 'https://hooks.example.com/new',
             recipientEmails: ['alerts@example.com', 'ops@example.com'],
+            telegramBotTokenConfigured: true,
             telegramChatIds: ['-10020', '123456'],
             telegramDeliveryMode: 'digest_10m',
           },
@@ -357,9 +363,24 @@ describe('dashboard client', () => {
     const settingsForm = harness.elements.get('settings-form');
     const settingsInput = harness.elements.get('settings-webhook-url');
     const settingsRecipientEmails = harness.elements.get('settings-recipient-emails');
+    const settingsTelegramTokenStatus = harness.elements.get('settings-telegram-token-status');
+    const settingsTelegramToken = harness.elements.get('settings-telegram-bot-token');
+    const settingsTelegramTokenClear = harness.elements.get('settings-telegram-token-clear');
     const settingsTelegramChatIds = harness.elements.get('settings-telegram-chat-ids');
     const settingsTelegramMode = harness.elements.get('settings-telegram-mode');
-    if (!apiKey || !saveKey || !settingsRefresh || !settingsForm || !settingsInput || !settingsRecipientEmails || !settingsTelegramChatIds || !settingsTelegramMode)
+    if (
+      !apiKey ||
+      !saveKey ||
+      !settingsRefresh ||
+      !settingsForm ||
+      !settingsInput ||
+      !settingsRecipientEmails ||
+      !settingsTelegramTokenStatus ||
+      !settingsTelegramToken ||
+      !settingsTelegramTokenClear ||
+      !settingsTelegramChatIds ||
+      !settingsTelegramMode
+    )
       throw new Error('missing element');
 
     await flush();
@@ -377,9 +398,12 @@ describe('dashboard client', () => {
     expect(settingsRecipientEmails.value).toBe('old@example.com');
     expect(settingsTelegramChatIds.value).toBe('-10010');
     expect(settingsTelegramMode.value).toBe('instant');
+    expect(settingsTelegramTokenStatus.textContent).toContain('configurado');
 
     settingsInput.value = 'https://hooks.example.com/new';
     settingsRecipientEmails.value = 'alerts@example.com, OPS@example.com\nalerts@example.com';
+    settingsTelegramToken.value = 'tenant_token_new';
+    settingsTelegramTokenClear.checked = false;
     settingsTelegramChatIds.value = '-10020, 123456\ninvalid_id\n123456';
     settingsTelegramMode.value = 'digest_10m';
     const submit = settingsForm.listeners.get('submit');
@@ -396,9 +420,76 @@ describe('dashboard client', () => {
     expect(JSON.parse(putOptions.body)).toEqual({
       webhook_notifier_url: 'https://hooks.example.com/new',
       recipient_emails: ['alerts@example.com', 'ops@example.com'],
+      telegram_bot_token: 'tenant_token_new',
       telegram_chat_ids: ['-10020', '123456'],
       telegram_delivery_mode: 'digest_10m',
     });
     expect(putOptions.headers.Authorization).toBe('Bearer ak_test');
+  });
+
+  it('sends clear flag when tenant telegram token clear checkbox is enabled', async () => {
+    const responses = [
+      ...fullRefreshResponses(),
+      {
+        body: {
+          data: {
+            webhookNotifierUrl: 'https://hooks.example.com/old',
+            recipientEmails: [],
+            telegramBotTokenConfigured: true,
+            telegramChatIds: [],
+            telegramDeliveryMode: 'instant',
+          },
+        },
+      },
+      {
+        body: {
+          data: {
+            webhookNotifierUrl: 'https://hooks.example.com/old',
+            recipientEmails: [],
+            telegramBotTokenConfigured: false,
+            telegramChatIds: [],
+            telegramDeliveryMode: 'instant',
+          },
+        },
+      },
+    ];
+
+    const harness = createHarness(responses);
+    const apiKey = harness.elements.get('api-key');
+    const saveKey = harness.elements.get('save-key');
+    const settingsRefresh = harness.elements.get('settings-refresh');
+    const settingsForm = harness.elements.get('settings-form');
+    const settingsTelegramToken = harness.elements.get('settings-telegram-bot-token');
+    const settingsTelegramTokenClear = harness.elements.get('settings-telegram-token-clear');
+    if (!apiKey || !saveKey || !settingsRefresh || !settingsForm || !settingsTelegramToken || !settingsTelegramTokenClear) {
+      throw new Error('missing element');
+    }
+
+    await flush();
+    apiKey.value = 'ak_test';
+    const click = saveKey.listeners.get('click');
+    if (!click) throw new Error('click listener missing');
+    await click();
+    await flush();
+
+    const refreshClick = settingsRefresh.listeners.get('click');
+    if (!refreshClick) throw new Error('settings refresh listener missing');
+    await refreshClick();
+    await flush();
+
+    settingsTelegramToken.value = '';
+    settingsTelegramTokenClear.checked = true;
+    const submit = settingsForm.listeners.get('submit');
+    if (!submit) throw new Error('settings submit listener missing');
+    await submit({ preventDefault: () => undefined });
+    await flush();
+
+    const putCall = harness.fetch.mock.calls.find(
+      (call) => call[0] === '/api/v1/settings' && (call[1] as { method?: string })?.method === 'PUT',
+    );
+    expect(putCall).toBeDefined();
+
+    const putOptions = putCall?.[1] as { body: string };
+    expect(JSON.parse(putOptions.body)).toMatchObject({ telegram_bot_token_clear: true });
   });
 });

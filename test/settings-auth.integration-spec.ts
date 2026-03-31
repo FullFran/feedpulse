@@ -12,6 +12,8 @@ process.env.LOG_LEVEL = 'error';
 process.env.ENABLE_AUTH = 'true';
 process.env.AUTH_PROVIDER = 'clerk_api_key';
 process.env.CLERK_SECRET_KEY = 'sk_test_x';
+process.env.TENANT_SECRETS_MASTER_KEY = 'tenant-master-key-for-tests';
+process.env.TELEGRAM_BOT_TOKEN = 'tg_global_fallback';
 
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -56,7 +58,7 @@ class FakeRedis {
 class CapturingNotifier implements AlertNotifierPort {
   readonly webhookDeliveries: Array<{ alertId: string; destinationUrl: string; tenantId: string }> = [];
   readonly emailDeliveries: Array<{ alertId: string; recipients: string[]; tenantId: string }> = [];
-  readonly telegramDeliveries: Array<{ alertId: string; chatId: string; tenantId: string }> = [];
+  readonly telegramDeliveries: Array<{ alertId: string; chatId: string; tenantId: string; token?: string }> = [];
   readonly telegramDigestDeliveries: TelegramDigestPayload[] = [];
 
   isEnabled(): boolean {
@@ -67,8 +69,8 @@ class CapturingNotifier implements AlertNotifierPort {
     return true;
   }
 
-  isTelegramEnabled(): boolean {
-    return true;
+  isTelegramEnabled(telegramBotToken?: string): boolean {
+    return Boolean(telegramBotToken);
   }
 
   async sendWebhook(alert: AlertNotificationPayload, destinationUrl: string): Promise<void> {
@@ -79,8 +81,8 @@ class CapturingNotifier implements AlertNotifierPort {
     this.emailDeliveries.push({ alertId: alert.id, recipients: recipientEmails, tenantId: alert.tenantId });
   }
 
-  async sendTelegram(alert: AlertNotificationPayload, chatId: string): Promise<void> {
-    this.telegramDeliveries.push({ alertId: alert.id, chatId, tenantId: alert.tenantId });
+  async sendTelegram(alert: AlertNotificationPayload, chatId: string, telegramBotToken?: string): Promise<void> {
+    this.telegramDeliveries.push({ alertId: alert.id, chatId, tenantId: alert.tenantId, token: telegramBotToken });
   }
 
   async sendTelegramDigest(payload: TelegramDigestPayload): Promise<void> {
@@ -103,6 +105,9 @@ async function bootstrapSchema(pool: { query: (sql: string, values?: unknown[]) 
       recipient_emails TEXT[] NOT NULL DEFAULT '{}',
       telegram_chat_ids TEXT[] NOT NULL DEFAULT '{}',
       telegram_delivery_mode TEXT NOT NULL DEFAULT 'instant',
+      telegram_bot_token_ciphertext TEXT,
+      telegram_bot_token_iv TEXT,
+      telegram_bot_token_tag TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
@@ -274,6 +279,7 @@ describe('settings + auth integration', () => {
         recipient_emails: ['alerts@A.example', 'alerts@a.example'],
         telegram_chat_ids: ['-1001', '-1001', '555'],
         telegram_delivery_mode: 'digest_10m',
+        telegram_bot_token: 'tenant_token_a',
       })
       .expect(200);
 
@@ -282,17 +288,35 @@ describe('settings + auth integration', () => {
     expect(getA.body.data.recipientEmails).toEqual(['alerts@a.example']);
     expect(getA.body.data.telegramChatIds).toEqual(['-1001', '555']);
     expect(getA.body.data.telegramDeliveryMode).toBe('digest_10m');
+    expect(getA.body.data.telegramBotTokenConfigured).toBe(true);
+    expect(getA.body.data.telegramBotToken).toBeUndefined();
+
+    await request(app.getHttpServer())
+      .put('/api/v1/settings')
+      .set('x-api-key', tenantA)
+      .send({ webhook_notifier_url: 'https://hooks.a.example/path-2' })
+      .expect(200);
+
+    const unchangedWithToken = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantA).expect(200);
+    expect(unchangedWithToken.body.data.telegramBotTokenConfigured).toBe(true);
 
     const getB = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantB).expect(200);
     expect(getB.body.data.webhookNotifierUrl).toBeNull();
     expect(getB.body.data.recipientEmails).toEqual([]);
     expect(getB.body.data.telegramChatIds).toEqual([]);
     expect(getB.body.data.telegramDeliveryMode).toBe('instant');
+    expect(getB.body.data.telegramBotTokenConfigured).toBe(false);
 
     await request(app.getHttpServer())
       .put('/api/v1/settings')
       .set('x-api-key', tenantA)
-      .send({ webhook_notifier_url: null, recipient_emails: [], telegram_chat_ids: [], telegram_delivery_mode: 'instant' })
+      .send({
+        webhook_notifier_url: null,
+        recipient_emails: [],
+        telegram_chat_ids: [],
+        telegram_delivery_mode: 'instant',
+        telegram_bot_token_clear: true,
+      })
       .expect(200);
 
     const cleared = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantA).expect(200);
@@ -300,6 +324,12 @@ describe('settings + auth integration', () => {
     expect(cleared.body.data.recipientEmails).toEqual([]);
     expect(cleared.body.data.telegramChatIds).toEqual([]);
     expect(cleared.body.data.telegramDeliveryMode).toBe('instant');
+    expect(cleared.body.data.telegramBotTokenConfigured).toBe(false);
+
+    await request(app.getHttpServer()).put('/api/v1/settings').set('x-api-key', tenantA).send({ webhook_notifier_url: 'https://hooks.a.example/updated' }).expect(200);
+
+    const unchanged = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantA).expect(200);
+    expect(unchanged.body.data.telegramBotTokenConfigured).toBe(false);
   });
 
   it('accepts clerk bearer token path and maps tenant deterministically', async () => {
@@ -325,6 +355,7 @@ describe('settings + auth integration', () => {
     expect(viaClerk.body.data.recipientEmails).toEqual(['ops@clerk.example']);
     expect(viaClerk.body.data.telegramChatIds).toEqual(['99999']);
     expect(viaClerk.body.data.telegramDeliveryMode).toBe('instant');
+    expect(viaClerk.body.data.telegramBotTokenConfigured).toBe(false);
   });
 
   it('validates recipient email list format on settings updates', async () => {
@@ -382,6 +413,43 @@ describe('settings + auth integration', () => {
     await processAlertDeliveryUseCase.execute({ alertId: 320, attemptNumber: 1, willRetry: false });
 
     expect(capturingNotifier.telegramDeliveries.some((d) => String(d.alertId) === '320' && d.chatId === '-100200')).toBe(true);
+    expect(capturingNotifier.telegramDeliveries.find((d) => String(d.alertId) === '320')?.token).toBe('tg_global_fallback');
+  });
+
+  it('falls back to global token when tenant token decrypt fails', async () => {
+    await pool.query(
+      `INSERT INTO tenant_settings (
+        tenant_id,
+        webhook_notifier_url,
+        recipient_emails,
+        telegram_chat_ids,
+        telegram_delivery_mode,
+        telegram_bot_token_ciphertext,
+        telegram_bot_token_iv,
+        telegram_bot_token_tag
+      ) VALUES (
+        'ak_telegram_broken_cipher',
+        null,
+        ARRAY[]::text[],
+        ARRAY['-100888'],
+        'instant',
+        'not_base64',
+        'also_bad',
+        'broken_tag'
+      )`,
+    );
+    await pool.query(`INSERT INTO feeds (id, tenant_id, url) VALUES (61, 'ak_telegram_broken_cipher', 'https://example.com/rss.xml')`);
+    await pool.query(
+      `INSERT INTO entries (id, tenant_id, feed_id, title, link, content, content_hash) VALUES (610, 'ak_telegram_broken_cipher', 61, 'Título fallback', 'https://example.com/fallback', 'Resumen', 'hash_tenant_token_2')`,
+    );
+    await pool.query(
+      `INSERT INTO rules (id, tenant_id, name, include_keywords, exclude_keywords, is_active) VALUES (605, 'ak_telegram_broken_cipher', 'Rule fallback', ARRAY['ia'], ARRAY[]::text[], true)`,
+    );
+    await pool.query(`INSERT INTO alerts (id, tenant_id, entry_id, rule_id) VALUES (620, 'ak_telegram_broken_cipher', 610, 605)`);
+
+    await processAlertDeliveryUseCase.execute({ alertId: 620, attemptNumber: 1, willRetry: false });
+
+    expect(capturingNotifier.telegramDeliveries.find((d) => String(d.alertId) === '620')?.token).toBe('tg_global_fallback');
   });
 
   it('queues and sends grouped telegram digest when mode is digest_10m', async () => {

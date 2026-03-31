@@ -350,6 +350,16 @@
             <article class="settings-card">
               <h3>Telegram</h3>
               <p class="settings-help">IDs de chat separados por coma o línea. Modo aplica solo al canal Telegram.</p>
+              <p id="settings-telegram-token-status" class="feedback settings-token-state" data-tone="warn">Token por tenant no configurado.</p>
+              <label>
+                Bot token (opcional por tenant)
+                <input id="settings-telegram-bot-token" type="password" placeholder="123456:AA..." autocomplete="new-password">
+              </label>
+              <label class="checkbox-inline">
+                <input id="settings-telegram-token-clear" type="checkbox">
+                Limpiar token por tenant guardado
+              </label>
+              <p class="settings-help">Deja el token vacío para no cambiarlo. Escribe uno nuevo para reemplazarlo. Marca "Limpiar" para borrar el token del tenant.</p>
               <label>
                 Chat IDs
                 <textarea id="settings-telegram-chat-ids" rows="4" placeholder="-1001234567890&#10;987654321"></textarea>

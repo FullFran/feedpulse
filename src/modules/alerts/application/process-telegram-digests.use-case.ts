@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
 import { ALERT_NOTIFIER, AlertNotifierPort } from '../../notifications/domain/alert-notifier.port';
+import { SettingsRepository } from '../../settings/settings.repository';
+import { TelegramBotTokenResolverService } from '../../settings/telegram-bot-token-resolver.service';
 
 import { AlertsRepository } from '../alerts.repository';
 
@@ -10,11 +12,13 @@ export class ProcessTelegramDigestsUseCase {
 
   constructor(
     private readonly alertsRepository: AlertsRepository,
+    private readonly settingsRepository: SettingsRepository,
+    private readonly telegramBotTokenResolverService: TelegramBotTokenResolverService,
     @Inject(ALERT_NOTIFIER) private readonly alertNotifier: AlertNotifierPort,
   ) {}
 
   async execute(input: { now?: Date; maxGroups?: number } = {}): Promise<{ processedGroups: number; sentItems: number }> {
-    if (!this.alertNotifier.isEnabled() || !this.alertNotifier.isTelegramEnabled()) {
+    if (!this.alertNotifier.isEnabled()) {
       return { processedGroups: 0, sentItems: 0 };
     }
 
@@ -32,11 +36,18 @@ export class ProcessTelegramDigestsUseCase {
         continue;
       }
 
+      const tenantSettings = await this.settingsRepository.getByTenantId(group.tenantId);
+      const telegramBotToken = this.telegramBotTokenResolverService.resolveForTenant({ tenantId: group.tenantId, settings: tenantSettings });
+      if (!this.alertNotifier.isTelegramEnabled(telegramBotToken)) {
+        continue;
+      }
+
       try {
         await this.alertNotifier.sendTelegramDigest({
           tenantId: group.tenantId,
           chatId: group.chatId,
           windowLabel: `Ventana hasta ${new Date(group.scheduledFor).toLocaleString('es-ES', { timeZone: 'UTC' })} UTC`,
+          telegramBotToken,
           items: group.items.map((item) => ({
             title: item.title,
             snippet: item.snippet,

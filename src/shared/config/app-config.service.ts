@@ -39,6 +39,10 @@ export class AppConfigService {
     return this.configService.get<string>('telegramBotToken', { infer: true });
   }
 
+  get tenantSecretsMasterKey(): string | undefined {
+    return this.configService.get<string>('tenantSecretsMasterKey', { infer: true });
+  }
+
   get telegramApiUrl(): string {
     return this.configService.get<string>('telegramApiUrl', { infer: true });
   }

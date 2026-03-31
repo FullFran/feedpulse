@@ -771,10 +771,20 @@ async function loadSettings() {
     const recipientEmails = payload.data?.recipientEmails || [];
     const telegramChatIds = payload.data?.telegramChatIds || [];
     const telegramDeliveryMode = payload.data?.telegramDeliveryMode || 'instant';
+    const telegramBotTokenConfigured = Boolean(payload.data?.telegramBotTokenConfigured);
     getById('settings-webhook-url').value = webhookUrl;
     getById('settings-recipient-emails').value = recipientEmails.join('\n');
+    getById('settings-telegram-bot-token').value = '';
+    getById('settings-telegram-token-clear').checked = false;
     getById('settings-telegram-chat-ids').value = telegramChatIds.join('\n');
     getById('settings-telegram-mode').value = telegramDeliveryMode;
+    setFeedback(
+      'settings-telegram-token-status',
+      telegramBotTokenConfigured
+        ? 'Token por tenant configurado.'
+        : 'Token por tenant no configurado (se usa fallback global si existe).',
+      telegramBotTokenConfigured ? 'success' : 'warn',
+    );
     setFeedback('settings-feedback', 'Configuración cargada correctamente.', 'info');
   } catch (error) {
     setFeedback('settings-feedback', `Error cargando settings: ${error.message}`, 'error');
@@ -787,19 +797,32 @@ async function saveSettings(event) {
     await requireAuth();
     const raw = getById('settings-webhook-url').value.trim();
     const recipientEmails = parseRecipientEmails(getById('settings-recipient-emails').value);
+    const telegramBotTokenRaw = getById('settings-telegram-bot-token').value.trim();
+    const clearTelegramBotToken = Boolean(getById('settings-telegram-token-clear').checked);
     const telegramChatIds = parseTelegramChatIds(getById('settings-telegram-chat-ids').value);
     const telegramModeRaw = getById('settings-telegram-mode').value;
     const telegramDeliveryMode = telegramModeRaw === 'digest_10m' ? 'digest_10m' : 'instant';
+
+    const body = {
+      webhook_notifier_url: raw || null,
+      recipient_emails: recipientEmails,
+      telegram_chat_ids: telegramChatIds,
+      telegram_delivery_mode: telegramDeliveryMode,
+    };
+
+    if (clearTelegramBotToken) {
+      body.telegram_bot_token_clear = true;
+    } else if (telegramBotTokenRaw.length > 0) {
+      body.telegram_bot_token = telegramBotTokenRaw;
+    }
+
     await api('/api/v1/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        webhook_notifier_url: raw || null,
-        recipient_emails: recipientEmails,
-        telegram_chat_ids: telegramChatIds,
-        telegram_delivery_mode: telegramDeliveryMode,
-      }),
+      body: JSON.stringify(body),
     });
+    getById('settings-telegram-bot-token').value = '';
+    getById('settings-telegram-token-clear').checked = false;
     setFeedback('settings-feedback', 'Configuración guardada con éxito.', 'success');
     await loadSettings();
   } catch (error) {
@@ -818,12 +841,16 @@ async function clearSettings() {
         recipient_emails: [],
         telegram_chat_ids: [],
         telegram_delivery_mode: 'instant',
+        telegram_bot_token_clear: true,
       }),
     });
     getById('settings-webhook-url').value = '';
     getById('settings-recipient-emails').value = '';
+    getById('settings-telegram-bot-token').value = '';
+    getById('settings-telegram-token-clear').checked = false;
     getById('settings-telegram-chat-ids').value = '';
     getById('settings-telegram-mode').value = 'instant';
+    setFeedback('settings-telegram-token-status', 'Token por tenant no configurado.', 'warn');
     setFeedback('settings-feedback', 'Canales limpiados para este tenant.', 'success');
   } catch (error) {
     setFeedback('settings-feedback', `Error limpiando canales: ${error.message}`, 'error');

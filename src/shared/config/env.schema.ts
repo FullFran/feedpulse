@@ -65,6 +65,7 @@ export const envSchema = z.object({
   RESEND_API_KEY: optionalString,
   RESEND_FROM_EMAIL: optionalEmail,
   TELEGRAM_BOT_TOKEN: optionalString,
+  TENANT_SECRETS_MASTER_KEY: optionalString,
   TELEGRAM_API_URL: z.url().default('https://api.telegram.org'),
   SCHEDULER_TICK_MS: z.coerce.number().int().positive().default(15000),
   SCHEDULER_BATCH_SIZE: z.coerce.number().int().positive().default(100),

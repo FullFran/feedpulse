@@ -232,6 +232,9 @@ export class TenantSettingsModel {
 
   @ApiProperty({ enum: ['instant', 'digest_10m'], example: 'instant' })
   telegramDeliveryMode!: 'instant' | 'digest_10m';
+
+  @ApiProperty({ example: true })
+  telegramBotTokenConfigured!: boolean;
 }
 
 export class HealthCheckStatusModel {
