@@ -82,9 +82,9 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     const title = this.truncate(alert.entry.title?.trim() || 'Alerta sin título', TELEGRAM_TITLE_MAX_LENGTH);
     const snippet = this.summarizeTelegramContent(alert.entry.content);
     const lines = [
-      `📰 *Nueva alerta*`,
-      `*${this.escapeTelegramMarkdown(title)}*`,
-      snippet ? this.escapeTelegramMarkdown(snippet) : null,
+      '📰 Nueva alerta',
+      title,
+      snippet,
       alert.entry.link ? `🔗 ${alert.entry.link}` : null,
     ].filter(Boolean) as string[];
 
@@ -92,14 +92,14 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
   }
 
   async sendTelegramDigest(payload: TelegramDigestPayload): Promise<void> {
-    const lines: string[] = [`📬 *Resumen de alertas (${payload.items.length})*`, this.escapeTelegramMarkdown(payload.windowLabel)];
+    const lines: string[] = [`📬 Resumen de alertas (${payload.items.length})`, payload.windowLabel];
 
     payload.items.slice(0, 12).forEach((item, index) => {
       const title = this.truncate(item.title?.trim() || 'Sin título', TELEGRAM_TITLE_MAX_LENGTH);
       const snippet = this.summarizeTelegramContent(item.snippet);
-      lines.push(`${index + 1}. *${this.escapeTelegramMarkdown(title)}*`);
+      lines.push(`${index + 1}. ${title}`);
       if (snippet) {
-        lines.push(`   ${this.escapeTelegramMarkdown(snippet)}`);
+        lines.push(`   ${snippet}`);
       }
       if (item.link) {
         lines.push(`   🔗 ${item.link}`);
@@ -234,7 +234,6 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
       body: JSON.stringify({
         chat_id: chatId,
         text,
-        parse_mode: 'MarkdownV2',
         disable_web_page_preview: true,
       }),
       signal: AbortSignal.timeout(this.appConfigService.webhookNotifierTimeoutMs),
@@ -259,7 +258,4 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
       .replaceAll("'", '&#39;');
   }
 
-  private escapeTelegramMarkdown(value: string): string {
-    return value.replaceAll(/([_\-*\[\]()~`>#+=|{}.!])/g, '\\$1');
-  }
 }

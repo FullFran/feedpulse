@@ -136,9 +136,9 @@ describe('WebhookAlertNotifier.sendEmail', () => {
 
     const [url, options] = (global.fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.telegram.test/bottg_test_token/sendMessage');
-    const payload = JSON.parse(String(options.body)) as { chat_id: string; text: string; parse_mode: string };
+    const payload = JSON.parse(String(options.body)) as { chat_id: string; text: string; parse_mode?: string };
     expect(payload.chat_id).toBe('-100200');
-    expect(payload.parse_mode).toBe('MarkdownV2');
+    expect(payload.parse_mode).toBeUndefined();
     expect(payload.text).toContain('Nueva alerta');
     expect(payload.text).toContain('https://example.com/post-1');
   });
