@@ -45,6 +45,16 @@ services:
         condition: service_healthy
     expose:
       - '3000'
+    networks:
+      - default
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.feedpulse-api.rule=Host(`feedpulse-rss-q2tykg-28f568-49-13-172-238.traefik.me`) || Host(`bah.blakia.es`)
+      - traefik.http.routers.feedpulse-api.entrypoints=web,websecure
+      - traefik.http.routers.feedpulse-api.tls=true
+      - traefik.http.routers.feedpulse-api.tls.certresolver=letsencrypt
+      - traefik.http.services.feedpulse-api.loadbalancer.server.port=3000
 
   scheduler:
     build: .
@@ -79,3 +89,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  dokploy-network:
+    external: true
