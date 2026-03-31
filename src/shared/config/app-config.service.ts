@@ -32,11 +32,13 @@ export class AppConfigService {
   }
 
   get schedulerBatchSize(): number {
-    return this.configService.get<number>('schedulerBatchSize', { infer: true });
+    const configured = this.configService.get<number>('schedulerBatchSize', { infer: true });
+    return Math.max(1, Math.min(configured, 40));
   }
 
   get workerConcurrency(): number {
-    return this.configService.get<number>('workerConcurrency', { infer: true });
+    const configured = this.configService.get<number>('workerConcurrency', { infer: true });
+    return Math.max(1, Math.min(configured, 3));
   }
 
   get fetchTimeoutMs(): number {
