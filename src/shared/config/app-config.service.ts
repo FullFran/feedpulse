@@ -66,4 +66,36 @@ export class AppConfigService {
   get workerMetricsPort(): number {
     return this.configService.get<number>('workerMetricsPort', { infer: true });
   }
+
+  get opmlUploadMaxBytes(): number {
+    return this.configService.get<number>('opmlUploadMaxBytes', { infer: true });
+  }
+
+  get opmlInitialJitterMaxSeconds(): number {
+    return this.configService.get<number>('opmlInitialJitterMaxSeconds', { infer: true });
+  }
+
+  get agentInterfaceV1(): boolean {
+    return this.configService.get<boolean>('agentInterfaceV1', { infer: true });
+  }
+
+  get tuiEnabled(): boolean {
+    return this.configService.get<boolean>('tuiEnabled', { infer: true });
+  }
+
+  get enableAuth(): boolean {
+    return this.configService.get<boolean>('enableAuth', { infer: true });
+  }
+
+  get authProvider(): string {
+    return this.configService.get<string>('authProvider', { infer: true });
+  }
+
+  get clerkSecretKey(): string | undefined {
+    return this.configService.get<string>('clerkSecretKey', { infer: true });
+  }
+
+  get clerkApiUrl(): string {
+    return this.configService.get<string>('clerkApiUrl', { infer: true });
+  }
 }

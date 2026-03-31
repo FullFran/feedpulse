@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable } from '@nestjs/common';
 
 import { DatabaseService } from '../../infrastructure/persistence/database.service';
+import { buildNormalizedFeedUrlHash, normalizeFeedUrl } from '../opml-imports/domain/url-normalizer';
 
 import { Feed } from './domain/feed.entity';
 
@@ -47,14 +48,16 @@ export class FeedsRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
   async create(input: { url: string; pollIntervalSeconds: number; status: 'active' | 'paused' | 'error' }): Promise<Feed> {
+    const normalizedUrlHash = this.buildNormalizedUrlHashOrNull(input.url);
+
     try {
       const result = await this.databaseService.query<FeedRow>(
         `
-          INSERT INTO feeds (url, poll_interval_seconds, status, next_check_at)
-          VALUES ($1, $2, $3, NOW())
+          INSERT INTO feeds (url, normalized_url_hash, poll_interval_seconds, status, next_check_at)
+          VALUES ($1, $2, $3, $4, NOW())
           RETURNING *
         `,
-        [input.url, input.pollIntervalSeconds, input.status],
+        [input.url, normalizedUrlHash, input.pollIntervalSeconds, input.status],
       );
 
       return mapFeed(result.rows[0]);
@@ -64,6 +67,14 @@ export class FeedsRepository {
       }
 
       throw error;
+    }
+  }
+
+  private buildNormalizedUrlHashOrNull(url: string): string | null {
+    try {
+      return buildNormalizedFeedUrlHash(normalizeFeedUrl(url));
+    } catch {
+      return null;
     }
   }
 
