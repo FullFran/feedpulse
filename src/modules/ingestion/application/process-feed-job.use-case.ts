@@ -138,16 +138,26 @@ export class ProcessFeedJobUseCase {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown fetch failure';
       this.metricsService.incrementFetchErrors();
+      const nextErrorCount = feed.errorCount + 1;
+      const backoffSeconds = this.computeErrorBackoffSeconds(feed.pollIntervalSeconds, nextErrorCount);
       await this.recordFetchLog(feed.id, feed.tenantId, null, null, true, message);
       await this.feedsRepository.updateAfterFetch({
         feedId: feed.id,
         status: 'error',
-        errorCount: feed.errorCount + 1,
+        errorCount: nextErrorCount,
         lastError: message,
-        nextCheckAt: new Date(Date.now() + feed.pollIntervalSeconds * 1000).toISOString(),
+        nextCheckAt: new Date(Date.now() + backoffSeconds * 1000).toISOString(),
       });
       throw error;
     }
+  }
+
+  private computeErrorBackoffSeconds(pollIntervalSeconds: number, errorCount: number): number {
+    const cappedErrors = Math.max(1, Math.min(errorCount, 6));
+    const exponential = pollIntervalSeconds * 2 ** (cappedErrors - 1);
+    const capped = Math.min(exponential, 6 * 60 * 60); // 6h max backoff
+    const jitter = Math.floor(Math.random() * Math.min(15 * 60, Math.max(1, Math.floor(capped * 0.15))));
+    return capped + jitter;
   }
 
   private async deliverAlerts(alertIds: number[]): Promise<void> {

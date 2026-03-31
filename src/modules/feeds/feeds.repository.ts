@@ -127,8 +127,10 @@ export class FeedsRepository {
       `
         SELECT *
         FROM feeds
-        WHERE status = 'active' AND next_check_at <= NOW()
-        ORDER BY next_check_at ASC
+        WHERE status IN ('active', 'error')
+          AND next_check_at <= NOW()
+        ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                 next_check_at ASC
         LIMIT $1
       `,
       [limit],
@@ -138,8 +140,15 @@ export class FeedsRepository {
       return [];
     }
 
+    const scheduledNextCheck = new Map<number, Date>();
+
     for (const feed of dueFeeds.rows) {
-      const nextCheckAt = new Date(Date.now() + feed.poll_interval_seconds * 1000).toISOString();
+      const intervalMs = feed.poll_interval_seconds * 1000;
+      const jitterWindowMs = Math.min(5 * 60 * 1000, Math.floor(intervalMs * 0.2));
+      const jitterMs = jitterWindowMs > 0 ? Math.floor(Math.random() * jitterWindowMs) : 0;
+      const nextCheckAtDate = new Date(Date.now() + intervalMs + jitterMs);
+      const nextCheckAt = nextCheckAtDate.toISOString();
+      scheduledNextCheck.set(feed.id, nextCheckAtDate);
       await this.databaseService.query(
         `
           UPDATE feeds
@@ -154,7 +163,7 @@ export class FeedsRepository {
     return dueFeeds.rows.map((row) =>
       mapFeed({
         ...row,
-        next_check_at: new Date(Date.now() + row.poll_interval_seconds * 1000),
+        next_check_at: scheduledNextCheck.get(row.id) ?? new Date(Date.now() + row.poll_interval_seconds * 1000),
         updated_at: new Date(),
       }),
     );
