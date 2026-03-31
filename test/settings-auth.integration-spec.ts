@@ -53,14 +53,23 @@ class FakeRedis {
 }
 
 class CapturingNotifier implements AlertNotifierPort {
-  readonly deliveries: Array<{ alertId: string; destinationUrl?: string; tenantId: string }> = [];
+  readonly webhookDeliveries: Array<{ alertId: string; destinationUrl: string; tenantId: string }> = [];
+  readonly emailDeliveries: Array<{ alertId: string; recipients: string[]; tenantId: string }> = [];
 
   isEnabled(): boolean {
     return true;
   }
 
-  async send(alert: AlertNotificationPayload, destinationUrl?: string): Promise<void> {
-    this.deliveries.push({ alertId: alert.id, destinationUrl, tenantId: alert.tenantId });
+  isEmailEnabled(): boolean {
+    return true;
+  }
+
+  async sendWebhook(alert: AlertNotificationPayload, destinationUrl: string): Promise<void> {
+    this.webhookDeliveries.push({ alertId: alert.id, destinationUrl, tenantId: alert.tenantId });
+  }
+
+  async sendEmail(alert: AlertNotificationPayload, recipientEmails: string[]): Promise<void> {
+    this.emailDeliveries.push({ alertId: alert.id, recipients: recipientEmails, tenantId: alert.tenantId });
   }
 }
 
@@ -76,6 +85,7 @@ async function bootstrapSchema(pool: { query: (sql: string, values?: unknown[]) 
     `CREATE TABLE tenant_settings (
       tenant_id TEXT PRIMARY KEY,
       webhook_notifier_url TEXT,
+      recipient_emails TEXT[] NOT NULL DEFAULT '{}',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
@@ -230,23 +240,26 @@ describe('settings + auth integration', () => {
     await request(app.getHttpServer())
       .put('/api/v1/settings')
       .set('x-api-key', tenantA)
-      .send({ webhook_notifier_url: 'https://hooks.a.example/path' })
+      .send({ webhook_notifier_url: 'https://hooks.a.example/path', recipient_emails: ['alerts@A.example', 'alerts@a.example'] })
       .expect(200);
 
     const getA = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantA).expect(200);
     expect(getA.body.data.webhookNotifierUrl).toBe('https://hooks.a.example/path');
+    expect(getA.body.data.recipientEmails).toEqual(['alerts@a.example']);
 
     const getB = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantB).expect(200);
     expect(getB.body.data.webhookNotifierUrl).toBeNull();
+    expect(getB.body.data.recipientEmails).toEqual([]);
 
     await request(app.getHttpServer())
       .put('/api/v1/settings')
       .set('x-api-key', tenantA)
-      .send({ webhook_notifier_url: null })
+      .send({ webhook_notifier_url: null, recipient_emails: [] })
       .expect(200);
 
     const cleared = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantA).expect(200);
     expect(cleared.body.data.webhookNotifierUrl).toBeNull();
+    expect(cleared.body.data.recipientEmails).toEqual([]);
   });
 
   it('accepts clerk bearer token path and maps tenant deterministically', async () => {
@@ -255,7 +268,7 @@ describe('settings + auth integration', () => {
     await request(app.getHttpServer())
       .put('/api/v1/settings')
       .set('Authorization', `Bearer ${fakeJwt}`)
-      .send({ webhook_notifier_url: 'https://hooks.clerk.example/path' })
+      .send({ webhook_notifier_url: 'https://hooks.clerk.example/path', recipient_emails: ['ops@clerk.example'] })
       .expect(200);
 
     const viaClerk = await request(app.getHttpServer())
@@ -264,9 +277,18 @@ describe('settings + auth integration', () => {
       .expect(200);
 
     expect(viaClerk.body.data.webhookNotifierUrl).toBe('https://hooks.clerk.example/path');
+    expect(viaClerk.body.data.recipientEmails).toEqual(['ops@clerk.example']);
   });
 
-  it('delivers alert using tenant webhook URL from database', async () => {
+  it('validates recipient email list format on settings updates', async () => {
+    await request(app.getHttpServer())
+      .put('/api/v1/settings')
+      .set('x-api-key', 'ak_invalid_emails')
+      .send({ recipient_emails: ['valid@example.com', 'not-an-email'] })
+      .expect(400);
+  });
+
+  it('delivers alert using tenant webhook URL and emails from database', async () => {
     await pool.query(`INSERT INTO feeds (id, tenant_id, url) VALUES (1, 'ak_alert_tenant', 'https://example.com/rss.xml')`);
     await pool.query(
       `INSERT INTO entries (id, tenant_id, feed_id, title, content, content_hash) VALUES (10, 'ak_alert_tenant', 1, 'Title', 'Body', 'hash_1')`,
@@ -276,13 +298,15 @@ describe('settings + auth integration', () => {
     );
     await pool.query(`INSERT INTO alerts (id, tenant_id, entry_id, rule_id) VALUES (20, 'ak_alert_tenant', 10, 5)`);
     await pool.query(
-      `INSERT INTO tenant_settings (tenant_id, webhook_notifier_url) VALUES ('ak_alert_tenant', 'https://tenant.example/webhook')`,
+      `INSERT INTO tenant_settings (tenant_id, webhook_notifier_url, recipient_emails) VALUES ('ak_alert_tenant', 'https://tenant.example/webhook', ARRAY['alerts@example.com'])`,
     );
 
     await processAlertDeliveryUseCase.execute({ alertId: 20, attemptNumber: 1, willRetry: false });
 
-    expect(capturingNotifier.deliveries).toHaveLength(1);
-    expect(capturingNotifier.deliveries[0].destinationUrl).toBe('https://tenant.example/webhook');
-    expect(capturingNotifier.deliveries[0].tenantId).toBe('ak_alert_tenant');
+    expect(capturingNotifier.webhookDeliveries).toHaveLength(1);
+    expect(capturingNotifier.webhookDeliveries[0].destinationUrl).toBe('https://tenant.example/webhook');
+    expect(capturingNotifier.webhookDeliveries[0].tenantId).toBe('ak_alert_tenant');
+    expect(capturingNotifier.emailDeliveries).toHaveLength(1);
+    expect(capturingNotifier.emailDeliveries[0].recipients).toEqual(['alerts@example.com']);
   });
 });

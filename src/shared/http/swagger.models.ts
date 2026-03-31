@@ -223,6 +223,9 @@ export class AlertDeliveryResultModel {
 export class TenantSettingsModel {
   @ApiPropertyOptional({ type: String, nullable: true, example: 'https://hooks.example.com/rss-alerts' })
   webhookNotifierUrl!: string | null;
+
+  @ApiProperty({ type: [String], example: ['alerts@example.com', 'ops@example.com'] })
+  recipientEmails!: string[];
 }
 
 export class HealthCheckStatusModel {

@@ -8,7 +8,15 @@ export class NoopAlertNotifier implements AlertNotifierPort {
     return false;
   }
 
-  async send(_alert: AlertNotificationPayload, _destinationUrl?: string): Promise<void> {
+  isEmailEnabled(): boolean {
+    return false;
+  }
+
+  async sendWebhook(_alert: AlertNotificationPayload, _destinationUrl: string): Promise<void> {
+    return undefined;
+  }
+
+  async sendEmail(_alert: AlertNotificationPayload, _recipientEmails: string[]): Promise<void> {
     return undefined;
   }
 }

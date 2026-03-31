@@ -32,14 +32,40 @@ export class ProcessAlertDeliveryUseCase {
 
     const tenantSettings = await this.settingsRepository.getByTenantId(alert.tenantId);
     const notifierUrl = tenantSettings?.webhookNotifierUrl ?? this.appConfigService.webhookNotifierUrl ?? null;
+    const recipientEmails = tenantSettings?.recipientEmails ?? [];
+    const shouldSendWebhook = Boolean(notifierUrl);
+    const shouldSendEmail = recipientEmails.length > 0 && this.alertNotifier.isEmailEnabled();
 
-    if (!notifierUrl || !this.alertNotifier.isEnabled()) {
+    if ((!shouldSendWebhook && !shouldSendEmail) || !this.alertNotifier.isEnabled()) {
       await this.alertsRepository.markDeliveryDisabled(input.alertId);
       return;
     }
 
     try {
-      await this.alertNotifier.send(alert, notifierUrl);
+      const channelErrors: string[] = [];
+
+      if (shouldSendWebhook && notifierUrl) {
+        try {
+          await this.alertNotifier.sendWebhook(alert, notifierUrl);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'unknown_webhook_failure';
+          channelErrors.push(`webhook:${message}`);
+        }
+      }
+
+      if (shouldSendEmail) {
+        try {
+          await this.alertNotifier.sendEmail(alert, recipientEmails);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'unknown_email_failure';
+          channelErrors.push(`email:${message}`);
+        }
+      }
+
+      if (channelErrors.length > 0) {
+        throw new Error(`notification_channels_failed:${channelErrors.join('|')}`);
+      }
+
       const firstSuccessfulDelivery = await this.alertsRepository.markSent(input.alertId, input.attemptNumber);
 
       if (firstSuccessfulDelivery) {

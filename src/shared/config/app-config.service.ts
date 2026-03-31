@@ -27,6 +27,14 @@ export class AppConfigService {
     return this.configService.get<number>('webhookNotifierTimeoutMs', { infer: true });
   }
 
+  get resendApiKey(): string | undefined {
+    return this.configService.get<string>('resendApiKey', { infer: true });
+  }
+
+  get resendFromEmail(): string | undefined {
+    return this.configService.get<string>('resendFromEmail', { infer: true });
+  }
+
   get schedulerTickMs(): number {
     return this.configService.get<number>('schedulerTickMs', { infer: true });
   }

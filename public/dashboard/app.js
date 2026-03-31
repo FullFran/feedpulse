@@ -73,6 +73,17 @@ function parseKeywords(value) {
     .filter(Boolean);
 }
 
+function parseRecipientEmails(value) {
+  return Array.from(
+    new Set(
+      String(value || '')
+        .split(/[\n,]/g)
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
 function setFeedback(id, text, tone = 'info') {
   const node = getById(id);
   node.textContent = text;
@@ -746,7 +757,9 @@ async function loadSettings() {
     await requireAuth();
     const payload = await api('/api/v1/settings');
     const webhookUrl = payload.data?.webhookNotifierUrl || '';
+    const recipientEmails = payload.data?.recipientEmails || [];
     getById('settings-webhook-url').value = webhookUrl;
+    getById('settings-recipient-emails').value = recipientEmails.join('\n');
     setFeedback('settings-feedback', webhookUrl ? 'Webhook configurado.' : 'Webhook deshabilitado.', 'info');
   } catch (error) {
     setFeedback('settings-feedback', `Error cargando settings: ${error.message}`, 'error');
@@ -758,10 +771,11 @@ async function saveSettings(event) {
   try {
     await requireAuth();
     const raw = getById('settings-webhook-url').value.trim();
+    const recipientEmails = parseRecipientEmails(getById('settings-recipient-emails').value);
     await api('/api/v1/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ webhook_notifier_url: raw || null }),
+      body: JSON.stringify({ webhook_notifier_url: raw || null, recipient_emails: recipientEmails }),
     });
     setFeedback('settings-feedback', 'Settings actualizados.', 'success');
     await loadSettings();
@@ -776,9 +790,10 @@ async function clearSettings() {
     await api('/api/v1/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ webhook_notifier_url: null }),
+      body: JSON.stringify({ webhook_notifier_url: null, recipient_emails: [] }),
     });
     getById('settings-webhook-url').value = '';
+    getById('settings-recipient-emails').value = '';
     setFeedback('settings-feedback', 'Webhook deshabilitado para este tenant.', 'success');
   } catch (error) {
     setFeedback('settings-feedback', `Error deshabilitando webhook: ${error.message}`, 'error');

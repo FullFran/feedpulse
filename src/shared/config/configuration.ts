@@ -7,6 +7,8 @@ export interface AppConfiguration {
   redisUrl: string;
   webhookNotifierUrl?: string;
   webhookNotifierTimeoutMs: number;
+  resendApiKey?: string;
+  resendFromEmail?: string;
   schedulerTickMs: number;
   schedulerBatchSize: number;
   workerConcurrency: number;
@@ -34,6 +36,8 @@ export const configuration = (env: Env): AppConfiguration => ({
   redisUrl: env.REDIS_URL,
   webhookNotifierUrl: env.WEBHOOK_NOTIFIER_URL,
   webhookNotifierTimeoutMs: env.WEBHOOK_NOTIFIER_TIMEOUT_MS,
+  resendApiKey: env.RESEND_API_KEY,
+  resendFromEmail: env.RESEND_FROM_EMAIL,
   schedulerTickMs: env.SCHEDULER_TICK_MS,
   schedulerBatchSize: env.SCHEDULER_BATCH_SIZE,
   workerConcurrency: env.WORKER_CONCURRENCY,

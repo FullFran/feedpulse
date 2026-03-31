@@ -160,6 +160,7 @@ function createHarness(responses: MockResponse[]) {
     'opml-status-output',
     'settings-form',
     'settings-webhook-url',
+    'settings-recipient-emails',
     'settings-save',
     'settings-clear',
     'settings-refresh',
@@ -315,9 +316,9 @@ describe('dashboard client', () => {
   it('loads and updates webhook settings from dashboard tab', async () => {
     const responses = [
       ...fullRefreshResponses(),
-      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/old' } } },
-      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/new' } } },
-      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/new' } } },
+      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/old', recipientEmails: ['old@example.com'] } } },
+      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/new', recipientEmails: ['alerts@example.com', 'ops@example.com'] } } },
+      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/new', recipientEmails: ['alerts@example.com', 'ops@example.com'] } } },
     ];
 
     const harness = createHarness(responses);
@@ -326,7 +327,9 @@ describe('dashboard client', () => {
     const settingsRefresh = harness.elements.get('settings-refresh');
     const settingsForm = harness.elements.get('settings-form');
     const settingsInput = harness.elements.get('settings-webhook-url');
-    if (!apiKey || !saveKey || !settingsRefresh || !settingsForm || !settingsInput) throw new Error('missing element');
+    const settingsRecipientEmails = harness.elements.get('settings-recipient-emails');
+    if (!apiKey || !saveKey || !settingsRefresh || !settingsForm || !settingsInput || !settingsRecipientEmails)
+      throw new Error('missing element');
 
     await flush();
     apiKey.value = 'ak_test';
@@ -340,8 +343,10 @@ describe('dashboard client', () => {
     await refreshClick();
     await flush();
     expect(settingsInput.value).toBe('https://hooks.example.com/old');
+    expect(settingsRecipientEmails.value).toBe('old@example.com');
 
     settingsInput.value = 'https://hooks.example.com/new';
+    settingsRecipientEmails.value = 'alerts@example.com, OPS@example.com\nalerts@example.com';
     const submit = settingsForm.listeners.get('submit');
     if (!submit) throw new Error('settings submit listener missing');
     await submit({ preventDefault: () => undefined });
@@ -353,7 +358,10 @@ describe('dashboard client', () => {
     expect(putCall).toBeDefined();
 
     const putOptions = putCall?.[1] as { body: string; headers: Record<string, string> };
-    expect(JSON.parse(putOptions.body)).toEqual({ webhook_notifier_url: 'https://hooks.example.com/new' });
+    expect(JSON.parse(putOptions.body)).toEqual({
+      webhook_notifier_url: 'https://hooks.example.com/new',
+      recipient_emails: ['alerts@example.com', 'ops@example.com'],
+    });
     expect(putOptions.headers.Authorization).toBe('Bearer ak_test');
   });
 });

@@ -143,13 +143,21 @@ class FakeAlertNotifier implements AlertNotifierPort {
     return true;
   }
 
-  async send(alert: AlertNotificationPayload, _destinationUrl?: string): Promise<void> {
+  isEmailEnabled(): boolean {
+    return false;
+  }
+
+  async sendWebhook(alert: AlertNotificationPayload, _destinationUrl: string): Promise<void> {
     if (this.failuresRemaining > 0) {
       this.failuresRemaining -= 1;
       throw new Error('webhook_delivery_failed_500');
     }
 
     this.deliveries.push(alert);
+  }
+
+  async sendEmail(_alert: AlertNotificationPayload, _recipientEmails: string[]): Promise<void> {
+    return undefined;
   }
 }
 
@@ -159,6 +167,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
     `CREATE TABLE tenant_settings (
       tenant_id TEXT PRIMARY KEY,
       webhook_notifier_url TEXT,
+      recipient_emails TEXT[] NOT NULL DEFAULT '{}',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
@@ -711,12 +720,12 @@ describe('vertical slice integration', () => {
 
     await expect(
       processAlertDeliveryUseCase.execute({ alertId: queuedAlert!.alertId, attemptNumber: 1, willRetry: true }),
-    ).rejects.toThrow('webhook_delivery_failed_500');
+    ).rejects.toThrow('notification_channels_failed:webhook:webhook_delivery_failed_500');
 
     const failedAlertsResponse = await request(app.getHttpServer()).get('/api/v1/alerts').expect(200);
     const failedAlert = failedAlertsResponse.body.data.find((alert: { rule: { name: string } }) => alert.rule.name === 'Failure watch');
     expect(failedAlert.deliveryStatus).toBe('retrying');
-    expect(failedAlert.lastDeliveryError).toBe('webhook_delivery_failed_500');
+    expect(failedAlert.lastDeliveryError).toBe('notification_channels_failed:webhook:webhook_delivery_failed_500');
     expect(failedAlert.deliveryAttempts).toBe(1);
 
     await request(app.getHttpServer())

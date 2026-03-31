@@ -25,6 +25,17 @@ const optionalString = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
+const optionalEmail = z.preprocess(
+  (value) => {
+    if (typeof value === 'string' && value.trim() === '') {
+      return undefined;
+    }
+
+    return value;
+  },
+  z.email().optional(),
+);
+
 const featureFlag = z.preprocess((value) => {
   if (typeof value === 'boolean') {
     return value;
@@ -51,6 +62,8 @@ export const envSchema = z.object({
   REDIS_URL: z.string().min(1),
   WEBHOOK_NOTIFIER_URL: optionalUrl,
   WEBHOOK_NOTIFIER_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
+  RESEND_API_KEY: optionalString,
+  RESEND_FROM_EMAIL: optionalEmail,
   SCHEDULER_TICK_MS: z.coerce.number().int().positive().default(15000),
   SCHEDULER_BATCH_SIZE: z.coerce.number().int().positive().default(100),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),

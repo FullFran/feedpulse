@@ -36,9 +36,11 @@ export class SettingsController {
   async update(@Req() request: Request, @Body() payload: UpdateSettingsDto) {
     const tenantId = resolveTenantIdFromRequest(request);
     const webhookNotifierUrl = payload.webhook_notifier_url === undefined ? null : payload.webhook_notifier_url;
+    const recipientEmails = payload.recipient_emails === undefined ? [] : payload.recipient_emails;
     const settings = await this.updateSettingsUseCase.execute({
       tenantId,
       webhookNotifierUrl,
+      recipientEmails,
     });
 
     return successResponse(request, settings);

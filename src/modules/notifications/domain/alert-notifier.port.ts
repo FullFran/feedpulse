@@ -20,7 +20,9 @@ export interface AlertNotificationPayload {
 
 export interface AlertNotifierPort {
   isEnabled(): boolean;
-  send(alert: AlertNotificationPayload, destinationUrl?: string): Promise<void>;
+  isEmailEnabled(): boolean;
+  sendWebhook(alert: AlertNotificationPayload, destinationUrl: string): Promise<void>;
+  sendEmail(alert: AlertNotificationPayload, recipientEmails: string[]): Promise<void>;
 }
 
 export const ALERT_NOTIFIER = Symbol('ALERT_NOTIFIER');
