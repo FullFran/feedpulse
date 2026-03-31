@@ -78,9 +78,11 @@ export class ProcessFeedJobUseCase {
 
       const parsed = await this.parser.parseString(response.body);
       const normalizedEntries = parsed.items.map((item) => {
+        const rawGuid = (item as { guid?: unknown }).guid;
+        const guidValue = typeof rawGuid === 'string' ? rawGuid : rawGuid == null ? null : String(rawGuid);
         const title = item.title?.trim() ?? null;
         const link = item.link?.trim() ?? null;
-        const guid = item.guid?.trim() || link || null;
+        const guid = guidValue?.trim() || link || null;
         const content = item.contentSnippet?.trim() ?? item.content?.trim() ?? null;
         const publishedAt = item.isoDate ?? item.pubDate ?? null;
         const contentHash = createHash('sha256')
@@ -139,15 +141,22 @@ export class ProcessFeedJobUseCase {
       const message = error instanceof Error ? error.message : 'Unknown fetch failure';
       this.metricsService.incrementFetchErrors();
       const nextErrorCount = feed.errorCount + 1;
+      const terminalFailure = this.isTerminalFeedFailure(message, nextErrorCount);
       const backoffSeconds = this.computeErrorBackoffSeconds(feed.pollIntervalSeconds, nextErrorCount);
       await this.recordFetchLog(feed.id, feed.tenantId, null, null, true, message);
       await this.feedsRepository.updateAfterFetch({
         feedId: feed.id,
-        status: 'error',
+        status: terminalFailure ? 'paused' : 'error',
         errorCount: nextErrorCount,
         lastError: message,
         nextCheckAt: new Date(Date.now() + backoffSeconds * 1000).toISOString(),
       });
+
+      if (terminalFailure) {
+        this.logger.warn(`Feed ${feed.id} auto-paused due to terminal failure: ${message}`);
+        return { insertedEntries: 0, createdAlerts: 0, statusCode: 0 };
+      }
+
       throw error;
     }
   }
@@ -158,6 +167,17 @@ export class ProcessFeedJobUseCase {
     const capped = Math.min(exponential, 6 * 60 * 60); // 6h max backoff
     const jitter = Math.floor(Math.random() * Math.min(15 * 60, Math.max(1, Math.floor(capped * 0.15))));
     return capped + jitter;
+  }
+
+  private isTerminalFeedFailure(message: string, errorCount: number): boolean {
+    const normalized = message.toLowerCase();
+    const http404 = normalized.includes('status 404');
+    const http410 = normalized.includes('status 410');
+    const unsupported = normalized.includes('feed not recognized as rss');
+    const hardXml = normalized.includes('unable to parse xml') || normalized.includes('invalid character in') || normalized.includes('attribute without value');
+    const repeatedlyForbidden = normalized.includes('status 403') && errorCount >= 5;
+
+    return http404 || http410 || unsupported || hardXml || repeatedlyForbidden;
   }
 
   private async deliverAlerts(alertIds: number[]): Promise<void> {

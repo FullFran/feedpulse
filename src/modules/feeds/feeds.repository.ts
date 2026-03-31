@@ -219,7 +219,7 @@ export class FeedsRepository {
     feedId: number;
     etag?: string | null;
     lastModified?: string | null;
-    status: 'active' | 'error';
+    status: 'active' | 'error' | 'paused';
     errorCount: number;
     lastError?: string | null;
     avgResponseMs?: number | null;
