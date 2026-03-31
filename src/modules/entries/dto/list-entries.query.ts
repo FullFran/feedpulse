@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsDateString, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ListEntriesQueryDto {
@@ -13,6 +13,16 @@ export class ListEntriesQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-01T00:00:00.000Z', description: 'Filter entries with published_at or fetched_at >= from.' })
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @ApiPropertyOptional({ example: '2026-03-31T23:59:59.999Z', description: 'Filter entries with published_at or fetched_at <= to.' })
+  @IsOptional()
+  @IsDateString()
+  to?: string;
 
   @ApiPropertyOptional({ type: Number, minimum: 1, default: 1 })
   @Transform(({ value }) => Number(value ?? 1))

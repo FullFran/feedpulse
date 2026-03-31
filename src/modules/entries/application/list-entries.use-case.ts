@@ -6,7 +6,7 @@ import { EntriesRepository } from '../entries.repository';
 export class ListEntriesUseCase {
   constructor(private readonly entriesRepository: EntriesRepository) {}
 
-  execute(input: { tenantId: string; page: number; pageSize: number; feedId?: number; search?: string }) {
+  execute(input: { tenantId: string; page: number; pageSize: number; feedId?: number; search?: string; from?: string; to?: string }) {
     return this.entriesRepository.list(input);
   }
 }

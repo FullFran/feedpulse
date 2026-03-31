@@ -1,5 +1,5 @@
-import { Controller, Get, Inject, Optional, Res, ServiceUnavailableException } from '@nestjs/common';
-import { Response } from 'express';
+import { Controller, Get, Inject, Optional, Req, Res, ServiceUnavailableException } from '@nestjs/common';
+import { Request, Response } from 'express';
 import { ApiOkResponse, ApiOperation, ApiProduces, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Pool } from 'pg';
 import IORedis from 'ioredis';
@@ -9,6 +9,7 @@ import { ReadinessService } from '../../infrastructure/persistence/readiness.ser
 import { REDIS_CONNECTION } from '../../infrastructure/queue/queue.constants';
 import { HealthResponseModel, ReadinessFailureResponseModel, ReadinessResponseModel } from '../../shared/http/swagger.models';
 import { AppConfigService } from '../../shared/config/app-config.service';
+import { resolveTenantIdFromRequest } from '../../shared/http/tenant-context';
 
 import { MetricsService } from './metrics.service';
 
@@ -124,5 +125,61 @@ export class HealthController {
 
     response.setHeader('Content-Type', this.metricsService.contentType);
     response.send(aggregatedMetrics);
+  }
+
+  @Get('api/v1/ops/summary')
+  @ApiOperation({ summary: 'Return tenant-scoped operational counters for the dashboard.' })
+  @ApiOkResponse({
+    description: 'Operational summary returned successfully.',
+    schema: {
+      type: 'object',
+      properties: {
+        data: {
+          type: 'object',
+          properties: {
+            feedsTotal: { type: 'number', example: 12455 },
+            feedsActive: { type: 'number', example: 12000 },
+            feedsError: { type: 'number', example: 455 },
+            entries24h: { type: 'number', example: 923 },
+            entries7d: { type: 'number', example: 5432 },
+            alertsPending: { type: 'number', example: 18 },
+          },
+        },
+      },
+    },
+  })
+  async opsSummary(@Req() request: Request) {
+    const tenantId = resolveTenantIdFromRequest(request);
+    const [feedsTotal, feedsActive, feedsError, entries24h, entries7d, alertsPending] = await Promise.all([
+      this.databasePool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM feeds WHERE tenant_id = $1', [tenantId]),
+      this.databasePool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM feeds WHERE tenant_id = $1 AND status = $2', [tenantId, 'active']),
+      this.databasePool.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM feeds WHERE tenant_id = $1 AND status = $2', [tenantId, 'error']),
+      this.databasePool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM entries WHERE tenant_id = $1 AND COALESCE(published_at, fetched_at) >= NOW() - INTERVAL '24 hours'`,
+        [tenantId],
+      ),
+      this.databasePool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM entries WHERE tenant_id = $1 AND COALESCE(published_at, fetched_at) >= NOW() - INTERVAL '7 days'`,
+        [tenantId],
+      ),
+      this.databasePool.query<{ count: string }>(
+        `SELECT COUNT(*)::text AS count FROM alerts WHERE tenant_id = $1 AND sent = false`,
+        [tenantId],
+      ),
+    ]);
+
+    return {
+      data: {
+        feedsTotal: Number(feedsTotal.rows[0]?.count ?? '0'),
+        feedsActive: Number(feedsActive.rows[0]?.count ?? '0'),
+        feedsError: Number(feedsError.rows[0]?.count ?? '0'),
+        entries24h: Number(entries24h.rows[0]?.count ?? '0'),
+        entries7d: Number(entries7d.rows[0]?.count ?? '0'),
+        alertsPending: Number(alertsPending.rows[0]?.count ?? '0'),
+      },
+      meta: {
+        timestamp: new Date().toISOString(),
+      },
+    };
   }
 }

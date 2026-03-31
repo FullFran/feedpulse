@@ -2,90 +2,28 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import vm from 'node:vm';
 
-type MockResponseBody = Record<string, unknown> | string;
-
 type MockResponse = {
-  body: MockResponseBody;
-  contentType?: string;
+  body: Record<string, unknown> | string;
   ok?: boolean;
   status?: number;
   statusText?: string;
+  contentType?: string;
 };
 
 class FakeElement {
-  id: string;
-  textContent = '';
-  className = '';
-  innerHTML = '';
   value = '';
-  children: FakeElement[] = [];
-  readonly listeners = new Map<string, (event: Record<string, unknown>) => Promise<void> | void>();
-  readonly attributes = new Map<string, string>();
-  resetCalled = false;
-  fields: Record<string, unknown> = {};
+  textContent = '';
+  innerHTML = '';
+  listeners = new Map<string, (event?: Record<string, unknown>) => void | Promise<void>>();
 
-  constructor(id = '') {
-    this.id = id;
-  }
-
-  addEventListener(type: string, handler: (event: Record<string, unknown>) => Promise<void> | void): void {
+  addEventListener(type: string, handler: (event?: Record<string, unknown>) => void | Promise<void>) {
     this.listeners.set(type, handler);
-  }
-
-  appendChild(child: FakeElement): FakeElement {
-    this.children.push(child);
-    return child;
-  }
-
-  querySelector(selector: string): FakeElement {
-    const existing = this.children.find((child) => child.attributes.get('selector') === selector);
-    if (existing) {
-      return existing;
-    }
-
-    const child = new FakeElement();
-    child.attributes.set('selector', selector);
-    this.children.push(child);
-    return child;
-  }
-
-  getAttribute(name: string): string | null {
-    return this.attributes.get(name) ?? null;
-  }
-
-  setAttribute(name: string, value: string): void {
-    this.attributes.set(name, value);
-  }
-
-  cloneNode(): FakeElement {
-    return new FakeElement();
-  }
-
-  reset(): void {
-    this.resetCalled = true;
-  }
-}
-
-class FakeTemplateElement extends FakeElement {
-  content = {
-    firstElementChild: {
-      cloneNode: () => new FakeElement(),
-    },
-  };
-}
-
-class FakeFormData {
-  constructor(private readonly form: FakeElement) {}
-
-  get(name: string): unknown {
-    return this.form.fields[name] ?? null;
   }
 }
 
 function createMockFetch(responses: MockResponse[]) {
   return jest.fn(async () => {
     const next = responses.shift();
-
     if (!next) {
       throw new Error('Unexpected fetch call');
     }
@@ -103,155 +41,99 @@ function createMockFetch(responses: MockResponse[]) {
   });
 }
 
-function createDashboardHarness(responses: MockResponse[]) {
-  const elements = new Map<string, FakeElement>([
-    ['summary-cards', new FakeElement('summary-cards')],
-    ['summary-card-template', new FakeTemplateElement('summary-card-template')],
-    ['feeds-list', new FakeElement('feeds-list')],
-    ['rules-list', new FakeElement('rules-list')],
-    ['entries-list', new FakeElement('entries-list')],
-    ['alerts-list', new FakeElement('alerts-list')],
-    ['refresh-all', new FakeElement('refresh-all')],
-    ['feed-form', new FakeElement('feed-form')],
-    ['feed-feedback', new FakeElement('feed-feedback')],
-    ['rule-form', new FakeElement('rule-form')],
-    ['rule-feedback', new FakeElement('rule-feedback')],
-  ]);
+function createHarness(responses: MockResponse[]) {
+  const ids = [
+    'api-key',
+    'save-key',
+    'refresh',
+    'auth-feedback',
+    'summary',
+    'entries-filter',
+    'from',
+    'to',
+    'search',
+    'page-size',
+    'entries-meta',
+    'entries-body',
+  ] as const;
 
+  const elements = new Map<string, FakeElement>(ids.map((id) => [id, new FakeElement()]));
   const fetch = createMockFetch(responses);
-  const body = new FakeElement('body');
+  const storage = new Map<string, string>();
 
   const context = vm.createContext({
-    console,
     fetch,
-    FormData: FakeFormData,
+    URLSearchParams,
+    localStorage: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+    },
     document: {
-      body,
-      createElement: () => new FakeElement(),
       getElementById: (id: string) => {
         const element = elements.get(id);
-        if (!element) {
-          throw new Error(`Unknown element ${id}`);
-        }
-
+        if (!element) throw new Error(`Unknown element ${id}`);
         return element;
       },
     },
-    window: {
-      alert: jest.fn(),
-    },
-    HTMLElement: FakeElement,
-    setTimeout,
-    clearTimeout,
+    Date,
     Promise,
+    console,
   });
 
   const script = readFileSync(join(process.cwd(), 'public', 'dashboard', 'app.js'), 'utf8');
   vm.runInContext(script, context);
 
-  return {
-    body,
-    elements,
-    fetch,
-  };
+  return { elements, fetch, storage };
 }
 
-async function flushPromises(): Promise<void> {
+async function flush() {
   await Promise.resolve();
   await Promise.resolve();
   await Promise.resolve();
-}
-
-function successfulRefreshResponses(): MockResponse[] {
-  return [
-    { body: { status: 'ok', checks: { api: 'up' } } },
-    { body: { status: 'ready', checks: { database: 'up', redis: 'up' } } },
-    { body: { data: [] } },
-    { body: { data: [] } },
-    { body: { data: [] } },
-    { body: { data: [] } },
-  ];
 }
 
 describe('dashboard client', () => {
-  it('keeps feed creation successful when the follow-up refresh fails', async () => {
-    const harness = createDashboardHarness([
-      ...successfulRefreshResponses(),
-      { body: { data: { id: 42 } } },
-      { ok: false, status: 503, statusText: 'Service Unavailable', body: { message: ['gateway_timeout'], error: 'Service Unavailable', statusCode: 503 } },
-      { body: { status: 'ready', checks: { database: 'up', redis: 'up' } } },
-      { body: { data: [] } },
-      { body: { data: [] } },
-      { body: { data: [] } },
-      { body: { data: [] } },
+  it('shows summary and entries after saving API key', async () => {
+    const harness = createHarness([
+      { ok: false, status: 401, statusText: 'Unauthorized', body: { message: 'missing_api_key' } },
+      { body: { data: { feedsTotal: 10, feedsActive: 9, feedsError: 1, entries24h: 4, entries7d: 12, alertsPending: 2 } } },
+      { body: { data: [{ id: '1', title: 'hello', link: 'https://x', feedId: 1, publishedAt: '2026-03-31T00:00:00.000Z', fetchedAt: '2026-03-31T00:00:00.000Z' }], meta: { total: 1 } } },
     ]);
 
-    await flushPromises();
+    const apiKey = harness.elements.get('api-key');
+    const saveKey = harness.elements.get('save-key');
+    const feedback = harness.elements.get('auth-feedback');
+    if (!apiKey || !saveKey || !feedback) throw new Error('missing element');
 
-    const feedForm = harness.elements.get('feed-form');
-    if (!feedForm) {
-      throw new Error('feed-form missing');
-    }
+    await flush();
+    apiKey.value = 'ak_test';
+    const click = saveKey.listeners.get('click');
+    if (!click) throw new Error('click listener missing');
+    await click();
+    await flush();
 
-    feedForm.fields = {
-      url: 'https://example.com/runtime.xml',
-      poll_interval_seconds: '300',
-      status: 'active',
-    };
-
-    const submit = feedForm.listeners.get('submit');
-    if (!submit) {
-      throw new Error('submit listener missing');
-    }
-
-    await submit({
-      preventDefault() {
-        return undefined;
-      },
-      currentTarget: feedForm,
-    });
-    await flushPromises();
-
-    const feedback = harness.elements.get('feed-feedback');
-    expect(feedback?.textContent).toBe('Feed created. Dashboard refresh failed: gateway_timeout');
-    expect(feedback?.className).toBe('feedback success');
-    expect(feedForm.resetCalled).toBe(true);
+    expect(harness.storage.get('rss-dashboard-api-key')).toBe('ak_test');
+    expect(feedback.textContent).toBe('OK');
   });
 
-  it('surfaces envelope API errors instead of request_failed', async () => {
-    const harness = createDashboardHarness([
-      ...successfulRefreshResponses(),
-      { ok: false, status: 409, statusText: 'Conflict', body: { error: { code: 'feed_conflict', message: 'feed_already_exists' } } },
+  it('surfaces API error in feedback', async () => {
+    const harness = createHarness([
+      { ok: false, status: 401, statusText: 'Unauthorized', body: { message: 'missing_api_key' } },
+      { ok: false, status: 500, statusText: 'Internal Server Error', body: { message: 'boom' } },
     ]);
 
-    await flushPromises();
+    const apiKey = harness.elements.get('api-key');
+    const saveKey = harness.elements.get('save-key');
+    const feedback = harness.elements.get('auth-feedback');
+    if (!apiKey || !saveKey || !feedback) throw new Error('missing element');
 
-    const feedForm = harness.elements.get('feed-form');
-    if (!feedForm) {
-      throw new Error('feed-form missing');
-    }
+    await flush();
+    apiKey.value = 'ak_test';
+    const click = saveKey.listeners.get('click');
+    if (!click) throw new Error('click listener missing');
+    await click();
+    await flush();
 
-    feedForm.fields = {
-      url: 'https://example.com/runtime.xml',
-      poll_interval_seconds: '300',
-      status: 'active',
-    };
-
-    const submit = feedForm.listeners.get('submit');
-    if (!submit) {
-      throw new Error('submit listener missing');
-    }
-
-    await submit({
-      preventDefault() {
-        return undefined;
-      },
-      currentTarget: feedForm,
-    });
-    await flushPromises();
-
-    const feedback = harness.elements.get('feed-feedback');
-    expect(feedback?.textContent).toBe('feed_already_exists');
-    expect(feedback?.className).toBe('feedback error');
+    expect(feedback.textContent).toContain('Error: boom');
   });
 });

@@ -612,7 +612,7 @@ describe('vertical slice integration', () => {
     expect(dashboardResponse.headers.location).toBe('/dashboard/');
 
     const dashboardIndexResponse = await request(app.getHttpServer()).get('/dashboard/').expect(200);
-    expect(dashboardIndexResponse.text).toContain('RSS Monitor Dashboard');
-    expect(dashboardIndexResponse.text).toContain('Operator Console');
+    expect(dashboardIndexResponse.text).toContain('RSS Operations Dashboard');
+    expect(dashboardIndexResponse.text).toContain('Filtrar noticias');
   });
 });

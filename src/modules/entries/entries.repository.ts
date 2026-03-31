@@ -108,7 +108,15 @@ export class EntriesRepository {
     return created;
   }
 
-  async list(input: { tenantId: string; page: number; pageSize: number; feedId?: number; search?: string }): Promise<{ items: Entry[]; total: number }> {
+  async list(input: {
+    tenantId: string;
+    page: number;
+    pageSize: number;
+    feedId?: number;
+    search?: string;
+    from?: string;
+    to?: string;
+  }): Promise<{ items: Entry[]; total: number }> {
     const where: string[] = [`tenant_id = $1`];
     const values: unknown[] = [input.tenantId];
 
@@ -120,6 +128,16 @@ export class EntriesRepository {
     if (input.search) {
       where.push(`(COALESCE(title, '') ILIKE $${values.length + 1} OR COALESCE(content, '') ILIKE $${values.length + 1})`);
       values.push(`%${input.search}%`);
+    }
+
+    if (input.from) {
+      where.push(`COALESCE(published_at, fetched_at) >= $${values.length + 1}::timestamptz`);
+      values.push(input.from);
+    }
+
+    if (input.to) {
+      where.push(`COALESCE(published_at, fetched_at) <= $${values.length + 1}::timestamptz`);
+      values.push(input.to);
     }
 
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';

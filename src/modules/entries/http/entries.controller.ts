@@ -27,6 +27,8 @@ export class EntriesController {
       pageSize: query.page_size,
       feedId: query.feed_id,
       search: query.search,
+      from: query.from,
+      to: query.to,
     });
 
     return paginatedResponse(request, result.items, query.page, query.page_size, result.total);
