@@ -220,6 +220,11 @@ export class AlertDeliveryResultModel {
   status!: 'queued' | 'already_sent' | 'disabled';
 }
 
+export class TenantSettingsModel {
+  @ApiPropertyOptional({ type: String, nullable: true, example: 'https://hooks.example.com/rss-alerts' })
+  webhookNotifierUrl!: string | null;
+}
+
 export class HealthCheckStatusModel {
   @ApiProperty({ example: 'ok' })
   api!: string;

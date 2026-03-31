@@ -14,12 +14,15 @@
       </header>
 
       <section class="panel auth-panel">
+        <p id="auth-mode" class="feedback">Modo auth: API key manual.</p>
         <label>
           API Key
           <input id="api-key" type="password" placeholder="ak_..." autocomplete="off">
         </label>
         <div class="row">
           <button id="save-key" type="button">Guardar key</button>
+          <button id="clerk-sign-in" type="button">Sign in (Clerk)</button>
+          <button id="clerk-sign-out" type="button">Sign out</button>
           <button id="refresh" type="button">Refrescar</button>
           <a href="/docs" target="_blank" rel="noreferrer">API Docs</a>
         </div>
@@ -32,6 +35,7 @@
         <button id="tab-btn-rules-alerts" class="tab-btn" type="button">Rules / Alerts</button>
         <button id="tab-btn-entries" class="tab-btn" type="button">Entries search</button>
         <button id="tab-btn-opml" class="tab-btn" type="button">OPML</button>
+        <button id="tab-btn-settings" class="tab-btn" type="button">Settings</button>
       </nav>
 
       <section id="tab-overview" class="tab-panel">
@@ -316,6 +320,22 @@
           </div>
       </section>
 
+      </section>
+
+      <section id="tab-settings" class="tab-panel" hidden>
+        <section class="panel">
+          <h2>Webhook notifier URL</h2>
+          <form id="settings-form" class="filters form-compact">
+            <label>
+              URL
+              <input id="settings-webhook-url" type="url" placeholder="https://hooks.example.com/rss-alerts">
+            </label>
+            <button id="settings-save" type="submit">Guardar</button>
+            <button id="settings-clear" type="button">Deshabilitar webhook</button>
+            <button id="settings-refresh" type="button">Refrescar</button>
+          </form>
+          <p id="settings-feedback" class="feedback"></p>
+        </section>
       </section>
     </main>
 

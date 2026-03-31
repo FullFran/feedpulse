@@ -9,11 +9,11 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
   constructor(@Inject(AppConfigService) private readonly appConfigService: AppConfigService) {}
 
   isEnabled(): boolean {
-    return Boolean(this.appConfigService.webhookNotifierUrl);
+    return true;
   }
 
-  async send(alert: AlertNotificationPayload): Promise<void> {
-    const url = this.appConfigService.webhookNotifierUrl;
+  async send(alert: AlertNotificationPayload, destinationUrl?: string): Promise<void> {
+    const url = destinationUrl ?? this.appConfigService.webhookNotifierUrl;
 
     if (!url) {
       return;

@@ -10,13 +10,16 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { ObservabilityModule } from './modules/observability/observability.module';
 import { OpmlImportsModule } from './modules/opml-imports/opml-imports.module';
 import { RulesModule } from './modules/rules/rules.module';
+import { SettingsModule } from './modules/settings/settings.module';
 import { configuration } from './shared/config/configuration';
 import { AppConfigModule } from './shared/config/app-config.module';
 import { AppConfigService } from './shared/config/app-config.service';
 import { validateEnv } from './shared/config/env.schema';
+import { AuthModule } from './shared/auth/auth.module';
 import { LoggerModule } from './shared/logging/logger.module';
 import { DatabaseModule } from './infrastructure/persistence/database.module';
 import { QueueModule } from './infrastructure/queue/queue.module';
+import { DashboardAuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -25,11 +28,14 @@ import { QueueModule } from './infrastructure/queue/queue.module';
       validate: (env) => configuration(validateEnv(env)),
     }),
     AppConfigModule,
+    AuthModule,
     LoggerModule,
     DatabaseModule,
     QueueModule,
+    DashboardAuthModule,
     FeedsModule,
     RulesModule,
+    SettingsModule,
     EntriesModule,
     NotificationsModule,
     AlertsModule,

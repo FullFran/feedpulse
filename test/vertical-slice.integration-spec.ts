@@ -143,7 +143,7 @@ class FakeAlertNotifier implements AlertNotifierPort {
     return true;
   }
 
-  async send(alert: AlertNotificationPayload): Promise<void> {
+  async send(alert: AlertNotificationPayload, _destinationUrl?: string): Promise<void> {
     if (this.failuresRemaining > 0) {
       this.failuresRemaining -= 1;
       throw new Error('webhook_delivery_failed_500');
@@ -156,6 +156,12 @@ class FakeAlertNotifier implements AlertNotifierPort {
 async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unknown> }): Promise<void> {
   const schema = [
     `CREATE TABLE schema_migrations (version TEXT PRIMARY KEY, applied_at TIMESTAMPTZ DEFAULT NOW())`,
+    `CREATE TABLE tenant_settings (
+      tenant_id TEXT PRIMARY KEY,
+      webhook_notifier_url TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
     `CREATE TABLE feeds (
       id SERIAL PRIMARY KEY,
       tenant_id TEXT NOT NULL DEFAULT 'legacy',

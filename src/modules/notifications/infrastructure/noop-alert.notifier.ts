@@ -8,7 +8,7 @@ export class NoopAlertNotifier implements AlertNotifierPort {
     return false;
   }
 
-  async send(_alert: AlertNotificationPayload): Promise<void> {
+  async send(_alert: AlertNotificationPayload, _destinationUrl?: string): Promise<void> {
     return undefined;
   }
 }

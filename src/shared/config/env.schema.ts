@@ -78,6 +78,8 @@ export const envSchema = z.object({
   AUTH_PROVIDER: z.string().trim().min(1).default('clerk_api_key'),
   /** Secret key used to call Clerk API key verification endpoint. */
   CLERK_SECRET_KEY: optionalString,
+  /** Publishable key used by dashboard Clerk JS login flow. */
+  CLERK_PUBLISHABLE_KEY: optionalString,
   /** Base URL for Clerk API calls. */
   CLERK_API_URL: z.url().default('https://api.clerk.com'),
 });

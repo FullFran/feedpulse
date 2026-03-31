@@ -1,5 +1,6 @@
 export interface AlertNotificationPayload {
   id: string;
+  tenantId: string;
   createdAt: string;
   sent: boolean;
   sentAt: string | null;
@@ -19,7 +20,7 @@ export interface AlertNotificationPayload {
 
 export interface AlertNotifierPort {
   isEnabled(): boolean;
-  send(alert: AlertNotificationPayload): Promise<void>;
+  send(alert: AlertNotificationPayload, destinationUrl?: string): Promise<void>;
 }
 
 export const ALERT_NOTIFIER = Symbol('ALERT_NOTIFIER');

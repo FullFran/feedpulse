@@ -23,6 +23,7 @@ export interface AppConfiguration {
   enableAuth: boolean;
   authProvider: string;
   clerkSecretKey?: string;
+  clerkPublishableKey?: string;
   clerkApiUrl: string;
 }
 
@@ -49,5 +50,6 @@ export const configuration = (env: Env): AppConfiguration => ({
   enableAuth: env.ENABLE_AUTH,
   authProvider: env.AUTH_PROVIDER,
   clerkSecretKey: env.CLERK_SECRET_KEY,
+  clerkPublishableKey: env.CLERK_PUBLISHABLE_KEY,
   clerkApiUrl: env.CLERK_API_URL,
 });

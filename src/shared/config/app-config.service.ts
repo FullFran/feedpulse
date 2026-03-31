@@ -97,6 +97,10 @@ export class AppConfigService {
     return this.configService.get<string>('clerkSecretKey', { infer: true });
   }
 
+  get clerkPublishableKey(): string | undefined {
+    return this.configService.get<string>('clerkPublishableKey', { infer: true });
+  }
+
   get clerkApiUrl(): string {
     return this.configService.get<string>('clerkApiUrl', { infer: true });
   }

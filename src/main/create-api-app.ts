@@ -5,11 +5,33 @@ import { join } from 'node:path';
 import { INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import express from 'express';
+import { NextFunction, Request, Response } from 'express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import { AppModule } from '../app.module';
+import { HttpAuthService } from '../shared/auth/http-auth.service';
 
 export function configureApiApplication(app: INestApplication): void {
+  const httpAuthService = app.get(HttpAuthService);
+
+  app.use(async (request: Request, _response: Response, next: NextFunction) => {
+    const path = request.path ?? '';
+    const isApiRoute = path.startsWith('/api/');
+    const isPublicApiRoute = path === '/api/v1/auth/dashboard-config';
+
+    if (!isApiRoute || isPublicApiRoute) {
+      next();
+      return;
+    }
+
+    try {
+      await httpAuthService.authenticateRequest(request);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.enableShutdownHooks();
   app.use('/dashboard', express.static(join(process.cwd(), 'public', 'dashboard')));
 
@@ -23,6 +45,7 @@ export function configureApiApplication(app: INestApplication): void {
       .addTag('Rules', 'Keyword rule management.')
       .addTag('Entries', 'Persisted entry inspection APIs.')
       .addTag('Alerts', 'Alert inspection and manual delivery APIs.')
+      .addTag('Settings', 'Tenant-scoped runtime settings and integrations.')
       .addTag('Dashboard', 'Operator dashboard mounted from the API origin.')
       .addTag('Observability', 'Health, readiness, and metrics endpoints.')
       .build(),

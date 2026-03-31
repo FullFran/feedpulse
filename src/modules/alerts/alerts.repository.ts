@@ -27,6 +27,7 @@ export interface AlertView {
 
 interface AlertRow {
   id: string;
+  tenant_id: string;
   sent: boolean;
   sent_at: Date | null;
   delivery_status: 'pending' | 'queued' | 'retrying' | 'sent' | 'failed' | 'disabled';
@@ -52,6 +53,7 @@ export interface CreatedAlert {
 }
 
 export interface AlertNotificationRecord extends AlertView {
+  tenantId: string;
   entry: AlertView['entry'] & {
     content: string | null;
   };
@@ -64,6 +66,7 @@ export interface AlertNotificationRecord extends AlertView {
 function mapAlert(row: AlertRow): AlertNotificationRecord {
   return {
     id: row.id,
+    tenantId: row.tenant_id,
     sent: row.sent,
     sentAt: row.sent_at?.toISOString() ?? null,
     deliveryStatus: row.delivery_status,
@@ -134,6 +137,7 @@ export class AlertsRepository {
       this.databaseService.query<AlertRow>(
         `
           SELECT a.id,
+                 a.tenant_id,
                  a.sent,
                  a.sent_at,
                  a.delivery_status,
@@ -163,7 +167,10 @@ export class AlertsRepository {
     ]);
 
     return {
-      items: itemsResult.rows.map(mapAlert),
+      items: itemsResult.rows.map((row) => {
+        const { tenantId: _tenantId, ...alert } = mapAlert(row);
+        return alert;
+      }),
       total: Number(totalResult.rows[0]?.count ?? '0'),
     };
   }
@@ -173,6 +180,7 @@ export class AlertsRepository {
       ? await this.databaseService.query<AlertRow>(
       `
         SELECT a.id,
+               a.tenant_id,
                a.sent,
                a.sent_at,
                a.delivery_status,
@@ -200,6 +208,7 @@ export class AlertsRepository {
       : await this.databaseService.query<AlertRow>(
       `
         SELECT a.id,
+               a.tenant_id,
                a.sent,
                a.sent_at,
                a.delivery_status,

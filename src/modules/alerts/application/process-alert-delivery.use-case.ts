@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 
 import { MetricsService } from '../../observability/metrics.service';
 import { ALERT_NOTIFIER, AlertNotifierPort } from '../../notifications/domain/alert-notifier.port';
+import { SettingsRepository } from '../../settings/settings.repository';
+import { AppConfigService } from '../../../shared/config/app-config.service';
 
 import { AlertsRepository } from '../alerts.repository';
 
@@ -12,6 +14,8 @@ export class ProcessAlertDeliveryUseCase {
   constructor(
     private readonly alertsRepository: AlertsRepository,
     private readonly metricsService: MetricsService,
+    private readonly settingsRepository: SettingsRepository,
+    private readonly appConfigService: AppConfigService,
     @Inject(ALERT_NOTIFIER) private readonly alertNotifier: AlertNotifierPort,
   ) {}
 
@@ -26,13 +30,16 @@ export class ProcessAlertDeliveryUseCase {
       return;
     }
 
-    if (!this.alertNotifier.isEnabled()) {
+    const tenantSettings = await this.settingsRepository.getByTenantId(alert.tenantId);
+    const notifierUrl = tenantSettings?.webhookNotifierUrl ?? this.appConfigService.webhookNotifierUrl ?? null;
+
+    if (!notifierUrl || !this.alertNotifier.isEnabled()) {
       await this.alertsRepository.markDeliveryDisabled(input.alertId);
       return;
     }
 
     try {
-      await this.alertNotifier.send(alert);
+      await this.alertNotifier.send(alert, notifierUrl);
       const firstSuccessfulDelivery = await this.alertsRepository.markSent(input.alertId, input.attemptNumber);
 
       if (firstSuccessfulDelivery) {

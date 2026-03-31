@@ -1,7 +1,8 @@
 const KEY_STORAGE = 'rss-dashboard-api-key';
+const CLERK_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js';
 
 const state = {
-  tabs: ['overview', 'feeds', 'rules-alerts', 'entries', 'opml'],
+  tabs: ['overview', 'feeds', 'rules-alerts', 'entries', 'opml', 'settings'],
   activeTab: 'overview',
   entriesPage: 1,
   feedsPage: 1,
@@ -12,6 +13,12 @@ const state = {
     feedDelete: true,
     ruleDelete: true,
     opml: true,
+  },
+  auth: {
+    mode: 'api-key',
+    clerkEnabled: false,
+    clerkReady: false,
+    clerkToken: '',
   },
 };
 
@@ -72,15 +79,61 @@ function setFeedback(id, text, tone = 'info') {
   node.dataset.tone = tone;
 }
 
-function requireApiKey() {
-  const key = getApiKey();
-  if (!key) {
-    throw new Error('missing_api_key');
+async function ensureClerkToken() {
+  const clerk = globalThis.Clerk;
+  if (!state.auth.clerkEnabled || !clerk || !clerk.session) {
+    state.auth.clerkToken = '';
+    return '';
   }
-  return key;
+
+  try {
+    const token = await clerk.session.getToken();
+    state.auth.clerkToken = token || '';
+    return state.auth.clerkToken;
+  } catch {
+    state.auth.clerkToken = '';
+    return '';
+  }
 }
 
-function buildHeaders(extra = {}) {
+async function requireAuth() {
+  const apiKey = getApiKey();
+  if (apiKey) {
+    state.auth.mode = 'api-key';
+    return;
+  }
+
+  const clerkToken = await ensureClerkToken();
+  if (clerkToken) {
+    state.auth.mode = 'clerk';
+    return;
+  }
+
+  throw new Error('missing_auth_credentials');
+}
+
+function renderAuthMode() {
+  const modeNode = getById('auth-mode');
+  if (getApiKey()) {
+    modeNode.textContent = 'Modo auth: API key manual.';
+    return;
+  }
+
+  if (state.auth.clerkToken) {
+    modeNode.textContent = 'Modo auth: Clerk session.';
+    return;
+  }
+
+  if (state.auth.clerkEnabled) {
+    modeNode.textContent = 'Modo auth: Clerk disponible (sin sesión) o API key manual.';
+    return;
+  }
+
+  modeNode.textContent = 'Modo auth: API key manual.';
+}
+
+async function buildHeaders(extra = {}) {
+  await ensureClerkToken();
   const apiKey = getApiKey();
   const headers = {
     ...extra,
@@ -89,15 +142,21 @@ function buildHeaders(extra = {}) {
   if (apiKey) {
     headers.Authorization = `Bearer ${apiKey}`;
     headers['x-api-key'] = apiKey;
+    return headers;
+  }
+
+  if (state.auth.clerkToken) {
+    headers.Authorization = `Bearer ${state.auth.clerkToken}`;
   }
 
   return headers;
 }
 
 async function apiRaw(path, options = {}) {
+  const headers = await buildHeaders(options.headers || {});
   const response = await fetch(path, {
     ...options,
-    headers: buildHeaders(options.headers || {}),
+    headers,
   });
 
   const isJson = (response.headers.get('content-type') || '').includes('application/json');
@@ -339,7 +398,7 @@ function buildEntriesParams() {
 
 async function loadOverview() {
   try {
-    requireApiKey();
+    await requireAuth();
     const [summary, health, ready] = await Promise.all([
       api('/api/v1/ops/summary'),
       api('/health'),
@@ -356,7 +415,7 @@ async function loadOverview() {
 
 async function searchEntries() {
   try {
-    requireApiKey();
+    await requireAuth();
     const params = buildEntriesParams();
     const payload = await api(`/api/v1/entries?${params.toString()}`);
     renderEntries(payload);
@@ -367,7 +426,7 @@ async function searchEntries() {
 
 async function loadFeeds() {
   try {
-    requireApiKey();
+    await requireAuth();
     const status = getById('feeds-filter-status').value;
     const q = getById('feeds-filter-q').value.trim();
     const pageSize = Number(getById('feeds-page-size').value || 25);
@@ -384,7 +443,7 @@ async function loadFeeds() {
 
 async function loadRules() {
   try {
-    requireApiKey();
+    await requireAuth();
     const pageSize = Number(getById('rules-page-size').value || 25);
     const params = new URLSearchParams({ page: String(state.rulesPage), page_size: String(pageSize) });
     const payload = await api(`/api/v1/rules?${params.toString()}`);
@@ -397,7 +456,7 @@ async function loadRules() {
 
 async function loadAlerts() {
   try {
-    requireApiKey();
+    await requireAuth();
     const sent = getById('alerts-sent').value;
     const pageSize = Number(getById('alerts-page-size').value || 25);
     const params = new URLSearchParams({ page: String(state.alertsPage), page_size: String(pageSize) });
@@ -422,7 +481,7 @@ function getOpmlImportId() {
 
 async function loadOpmlPreview() {
   try {
-    requireApiKey();
+    await requireAuth();
     if (!state.capabilities.opml) {
       setFeedback('opml-feedback', 'OPML no está disponible en este backend.', 'warn');
       return;
@@ -445,7 +504,7 @@ async function loadOpmlPreview() {
 
 async function loadOpmlStatus() {
   try {
-    requireApiKey();
+    await requireAuth();
     const importId = getOpmlImportId();
     const payload = await api(`/api/v1/opml/imports/${importId}/status`);
     const data = payload.data || {};
@@ -460,8 +519,11 @@ async function loadOpmlStatus() {
 }
 
 async function refreshAll() {
-  if (!getApiKey()) {
-    setFeedback('auth-feedback', 'Ingresa una API key para comenzar.', 'warn');
+  try {
+    await requireAuth();
+  } catch {
+    setFeedback('auth-feedback', 'Inicia sesión con Clerk o ingresa una API key para comenzar.', 'warn');
+    renderAuthMode();
     return;
   }
 
@@ -472,12 +534,13 @@ async function refreshAll() {
     return;
   }
   setFeedback('auth-feedback', 'Datos actualizados.', 'success');
+  renderAuthMode();
 }
 
 async function createFeed(event) {
   event.preventDefault();
   try {
-    requireApiKey();
+    await requireAuth();
     const payload = {
       url: getById('feed-url').value.trim(),
       poll_interval_seconds: Number(getById('feed-poll-interval').value || 1800),
@@ -500,7 +563,7 @@ async function createFeed(event) {
 async function createRule(event) {
   event.preventDefault();
   try {
-    requireApiKey();
+    await requireAuth();
     const includeKeywords = parseKeywords(getById('rule-include').value);
     if (!includeKeywords.length) {
       throw new Error('rule_missing_include_keywords');
@@ -531,7 +594,7 @@ async function createRule(event) {
 async function uploadOpml(event) {
   event.preventDefault();
   try {
-    requireApiKey();
+    await requireAuth();
     const input = getById('opml-file');
     const file = input.files?.[0];
     if (!file) {
@@ -560,7 +623,7 @@ async function uploadOpml(event) {
 
 async function confirmOpml() {
   try {
-    requireApiKey();
+    await requireAuth();
     const importId = getOpmlImportId();
     const payload = await api(`/api/v1/opml/imports/${importId}/confirm`, { method: 'POST' });
     setFeedback('opml-status-output', `Confirmación enviada: ${payload.data?.status || 'queued'}.`, 'success');
@@ -582,7 +645,7 @@ async function handleFeedsTableAction(event) {
   }
 
   try {
-    requireApiKey();
+    await requireAuth();
     if (action === 'check') {
       await api(`/api/v1/feeds/${feedId}/check-now`, { method: 'POST' });
       setFeedback('feeds-feedback', `Feed ${feedId} encolado para check inmediato.`, 'success');
@@ -635,7 +698,7 @@ async function handleRulesTableAction(event) {
   }
 
   try {
-    requireApiKey();
+    await requireAuth();
     if (action === 'delete') {
       await api(`/api/v1/rules/${ruleId}`, { method: 'DELETE' });
       setFeedback('rules-feedback', `Regla ${ruleId} deshabilitada.`, 'success');
@@ -666,7 +729,7 @@ async function handleAlertsTableAction(event) {
   }
 
   try {
-    requireApiKey();
+    await requireAuth();
     if (action === 'send') {
       await api(`/api/v1/alerts/${alertId}/send`, { method: 'POST' });
       setFeedback('alerts-feedback', `Alert ${alertId} reencolada para envío.`, 'success');
@@ -678,12 +741,120 @@ async function handleAlertsTableAction(event) {
   }
 }
 
+async function loadSettings() {
+  try {
+    await requireAuth();
+    const payload = await api('/api/v1/settings');
+    const webhookUrl = payload.data?.webhookNotifierUrl || '';
+    getById('settings-webhook-url').value = webhookUrl;
+    setFeedback('settings-feedback', webhookUrl ? 'Webhook configurado.' : 'Webhook deshabilitado.', 'info');
+  } catch (error) {
+    setFeedback('settings-feedback', `Error cargando settings: ${error.message}`, 'error');
+  }
+}
+
+async function saveSettings(event) {
+  event.preventDefault();
+  try {
+    await requireAuth();
+    const raw = getById('settings-webhook-url').value.trim();
+    await api('/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ webhook_notifier_url: raw || null }),
+    });
+    setFeedback('settings-feedback', 'Settings actualizados.', 'success');
+    await loadSettings();
+  } catch (error) {
+    setFeedback('settings-feedback', `Error guardando settings: ${error.message}`, 'error');
+  }
+}
+
+async function clearSettings() {
+  try {
+    await requireAuth();
+    await api('/api/v1/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ webhook_notifier_url: null }),
+    });
+    getById('settings-webhook-url').value = '';
+    setFeedback('settings-feedback', 'Webhook deshabilitado para este tenant.', 'success');
+  } catch (error) {
+    setFeedback('settings-feedback', `Error deshabilitando webhook: ${error.message}`, 'error');
+  }
+}
+
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('script_load_failed'));
+    document.head.appendChild(script);
+  });
+}
+
+async function initClerk() {
+  if (typeof document.createElement !== 'function' || !document.head || typeof document.head.appendChild !== 'function') {
+    renderAuthMode();
+    return;
+  }
+
+  try {
+    const cfg = await api('/api/v1/auth/dashboard-config');
+    const publishableKey = cfg.data?.clerkPublishableKey;
+    state.auth.clerkEnabled = Boolean(cfg.data?.clerkEnabled && publishableKey);
+    if (!state.auth.clerkEnabled) {
+      renderAuthMode();
+      return;
+    }
+
+    await loadExternalScript(CLERK_SCRIPT_URL);
+    await globalThis.Clerk.load({ publishableKey });
+    state.auth.clerkReady = true;
+    await ensureClerkToken();
+    renderAuthMode();
+  } catch {
+    state.auth.clerkEnabled = false;
+    renderAuthMode();
+  }
+}
+
+async function signInWithClerk() {
+  if (!state.auth.clerkEnabled || !state.auth.clerkReady || !globalThis.Clerk) {
+    setFeedback('auth-feedback', 'Clerk no está disponible en este entorno.', 'warn');
+    return;
+  }
+
+  await globalThis.Clerk.openSignIn();
+  await ensureClerkToken();
+  renderAuthMode();
+  await refreshAll();
+}
+
+async function signOutFromClerk() {
+  if (!globalThis.Clerk) {
+    return;
+  }
+
+  await globalThis.Clerk.signOut();
+  state.auth.clerkToken = '';
+  renderAuthMode();
+  setFeedback('auth-feedback', 'Sesión Clerk cerrada.', 'info');
+}
+
 function initTabs() {
   getById('tab-btn-overview').addEventListener('click', () => switchTab('overview'));
   getById('tab-btn-feeds').addEventListener('click', () => switchTab('feeds'));
   getById('tab-btn-rules-alerts').addEventListener('click', () => switchTab('rules-alerts'));
   getById('tab-btn-entries').addEventListener('click', () => switchTab('entries'));
   getById('tab-btn-opml').addEventListener('click', () => switchTab('opml'));
+  getById('tab-btn-settings').addEventListener('click', () => {
+    switchTab('settings');
+    void loadSettings();
+  });
 }
 
 function initEvents() {
@@ -691,7 +862,17 @@ function initEvents() {
 
   getById('save-key').addEventListener('click', async () => {
     setApiKey(getById('api-key').value);
+    state.auth.clerkToken = '';
+    renderAuthMode();
     await refreshAll();
+  });
+
+  getById('clerk-sign-in').addEventListener('click', () => {
+    void signInWithClerk();
+  });
+
+  getById('clerk-sign-out').addEventListener('click', () => {
+    void signOutFromClerk();
   });
 
   getById('refresh').addEventListener('click', () => {
@@ -791,11 +972,23 @@ function initEvents() {
   getById('opml-status-refresh').addEventListener('click', () => {
     void loadOpmlStatus();
   });
+
+  getById('settings-form').addEventListener('submit', (event) => {
+    void saveSettings(event);
+  });
+  getById('settings-refresh').addEventListener('click', () => {
+    void loadSettings();
+  });
+  getById('settings-clear').addEventListener('click', () => {
+    void clearSettings();
+  });
 }
 
 function bootstrap() {
   initTabs();
   initEvents();
+  renderAuthMode();
+  void initClerk();
   switchTab('overview');
   void refreshAll();
 }

@@ -89,7 +89,10 @@ function createHarness(responses: MockResponse[]) {
   const ids = [
     'api-key',
     'save-key',
+    'clerk-sign-in',
+    'clerk-sign-out',
     'refresh',
+    'auth-mode',
     'auth-feedback',
     'summary',
     'health-live',
@@ -155,16 +158,24 @@ function createHarness(responses: MockResponse[]) {
     'opml-confirm',
     'opml-status-refresh',
     'opml-status-output',
+    'settings-form',
+    'settings-webhook-url',
+    'settings-save',
+    'settings-clear',
+    'settings-refresh',
+    'settings-feedback',
     'tab-btn-overview',
     'tab-btn-feeds',
     'tab-btn-rules-alerts',
     'tab-btn-entries',
     'tab-btn-opml',
+    'tab-btn-settings',
     'tab-overview',
     'tab-feeds',
     'tab-rules-alerts',
     'tab-entries',
     'tab-opml',
+    'tab-settings',
   ] as const;
 
   const elements = new Map<string, FakeElement>(ids.map((id) => [id, new FakeElement()]));
@@ -224,7 +235,7 @@ describe('dashboard client', () => {
     await flush();
 
     expect(harness.fetch).toHaveBeenCalledTimes(0);
-    expect(feedback.textContent).toContain('Ingresa una API key');
+    expect(feedback.textContent).toContain('API key');
   });
 
   it('saves API key and sends tenant auth headers', async () => {
@@ -299,5 +310,50 @@ describe('dashboard client', () => {
     });
     expect(postOptions.headers.Authorization).toBe('Bearer ak_test');
     expect(postOptions.headers['x-api-key']).toBe('ak_test');
+  });
+
+  it('loads and updates webhook settings from dashboard tab', async () => {
+    const responses = [
+      ...fullRefreshResponses(),
+      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/old' } } },
+      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/new' } } },
+      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/new' } } },
+    ];
+
+    const harness = createHarness(responses);
+    const apiKey = harness.elements.get('api-key');
+    const saveKey = harness.elements.get('save-key');
+    const settingsRefresh = harness.elements.get('settings-refresh');
+    const settingsForm = harness.elements.get('settings-form');
+    const settingsInput = harness.elements.get('settings-webhook-url');
+    if (!apiKey || !saveKey || !settingsRefresh || !settingsForm || !settingsInput) throw new Error('missing element');
+
+    await flush();
+    apiKey.value = 'ak_test';
+    const click = saveKey.listeners.get('click');
+    if (!click) throw new Error('click listener missing');
+    await click();
+    await flush();
+
+    const refreshClick = settingsRefresh.listeners.get('click');
+    if (!refreshClick) throw new Error('settings refresh listener missing');
+    await refreshClick();
+    await flush();
+    expect(settingsInput.value).toBe('https://hooks.example.com/old');
+
+    settingsInput.value = 'https://hooks.example.com/new';
+    const submit = settingsForm.listeners.get('submit');
+    if (!submit) throw new Error('settings submit listener missing');
+    await submit({ preventDefault: () => undefined });
+    await flush();
+
+    const putCall = harness.fetch.mock.calls.find(
+      (call) => call[0] === '/api/v1/settings' && (call[1] as { method?: string })?.method === 'PUT',
+    );
+    expect(putCall).toBeDefined();
+
+    const putOptions = putCall?.[1] as { body: string; headers: Record<string, string> };
+    expect(JSON.parse(putOptions.body)).toEqual({ webhook_notifier_url: 'https://hooks.example.com/new' });
+    expect(putOptions.headers.Authorization).toBe('Bearer ak_test');
   });
 });
