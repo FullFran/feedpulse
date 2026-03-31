@@ -19,16 +19,24 @@ import { AppModule } from '../src/app.module';
 import { DATABASE_POOL } from '../src/infrastructure/persistence/database.constants';
 import { AlertDeliveryQueue } from '../src/infrastructure/queue/alert-delivery.queue';
 import { FetchFeedQueue } from '../src/infrastructure/queue/fetch-feed.queue';
+import { OpmlApplyImportQueue } from '../src/infrastructure/queue/opml-apply-import.queue';
+import { OpmlParsePreviewQueue } from '../src/infrastructure/queue/opml-parse-preview.queue';
 import {
   ALERT_DELIVERY_QUEUE_TOKEN,
   AlertDeliveryJobData,
   FETCH_FEED_QUEUE_TOKEN,
   FetchFeedJobData,
+  OPML_APPLY_IMPORT_QUEUE_TOKEN,
+  OPML_PARSE_PREVIEW_QUEUE_TOKEN,
+  OpmlApplyImportJobData,
+  OpmlParsePreviewJobData,
   REDIS_CONNECTION,
 } from '../src/infrastructure/queue/queue.constants';
 import { ProcessAlertDeliveryUseCase } from '../src/modules/alerts/application/process-alert-delivery.use-case';
 import { ProcessFeedJobUseCase } from '../src/modules/ingestion/application/process-feed-job.use-case';
 import { ScheduleDueFeedsUseCase } from '../src/modules/ingestion/application/schedule-due-feeds.use-case';
+import { ProcessOpmlApplyJobUseCase } from '../src/modules/opml-imports/application/process-opml-apply-job.use-case';
+import { ProcessOpmlParseJobUseCase } from '../src/modules/opml-imports/application/process-opml-parse-job.use-case';
 import { FEED_FETCHER, FeedFetchResult } from '../src/modules/ingestion/domain/feed-fetcher.port';
 import { ALERT_NOTIFIER, AlertNotificationPayload, AlertNotifierPort } from '../src/modules/notifications/domain/alert-notifier.port';
 import { configureApiApplication } from '../src/main/create-api-app';
@@ -49,6 +57,30 @@ class FakeAlertDeliveryQueue {
   readonly jobs: AlertDeliveryJobData[] = [];
 
   async enqueue(job: AlertDeliveryJobData): Promise<void> {
+    this.jobs.push(job);
+  }
+
+  createWorker() {
+    throw new Error('Not used in integration test');
+  }
+}
+
+class FakeOpmlParseQueue {
+  readonly jobs: OpmlParsePreviewJobData[] = [];
+
+  async enqueue(job: OpmlParsePreviewJobData): Promise<void> {
+    this.jobs.push(job);
+  }
+
+  createWorker() {
+    throw new Error('Not used in integration test');
+  }
+}
+
+class FakeOpmlApplyQueue {
+  readonly jobs: OpmlApplyImportJobData[] = [];
+
+  async enqueue(job: OpmlApplyImportJobData): Promise<void> {
     this.jobs.push(job);
   }
 
@@ -115,6 +147,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
     `CREATE TABLE feeds (
       id SERIAL PRIMARY KEY,
       url TEXT NOT NULL UNIQUE,
+      normalized_url_hash TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       etag TEXT,
       last_modified TEXT,
@@ -128,6 +161,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
+    `CREATE UNIQUE INDEX idx_feeds_normalized_url_hash_unique ON feeds (normalized_url_hash) WHERE normalized_url_hash IS NOT NULL`,
     `CREATE TABLE entries (
       id BIGSERIAL PRIMARY KEY,
       feed_id INT NOT NULL REFERENCES feeds(id),
@@ -135,6 +169,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       link TEXT,
       guid TEXT,
       content TEXT,
+      normalized_search_document TEXT NOT NULL DEFAULT '',
       content_hash TEXT NOT NULL,
       published_at TIMESTAMPTZ,
       fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -174,6 +209,44 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (entry_id, rule_id)
     )`,
+    `CREATE TABLE opml_imports (
+      id BIGSERIAL PRIMARY KEY,
+      status TEXT NOT NULL CHECK (status IN ('uploaded', 'parsing', 'preview_ready', 'importing', 'completed', 'failed_validation', 'failed')),
+      file_name TEXT NOT NULL,
+      file_size_bytes BIGINT NOT NULL CHECK (file_size_bytes >= 0),
+      source_checksum TEXT,
+      error_message TEXT,
+      total_items INT NOT NULL DEFAULT 0 CHECK (total_items >= 0),
+      valid_items INT NOT NULL DEFAULT 0 CHECK (valid_items >= 0),
+      duplicate_items INT NOT NULL DEFAULT 0 CHECK (duplicate_items >= 0),
+      existing_items INT NOT NULL DEFAULT 0 CHECK (existing_items >= 0),
+      invalid_items INT NOT NULL DEFAULT 0 CHECK (invalid_items >= 0),
+      imported_items INT NOT NULL DEFAULT 0 CHECK (imported_items >= 0),
+      uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      confirmed_at TIMESTAMPTZ,
+      completed_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE TABLE opml_import_items (
+      id BIGSERIAL PRIMARY KEY,
+      import_id BIGINT NOT NULL REFERENCES opml_imports(id) ON DELETE CASCADE,
+      title TEXT,
+      outline_path TEXT,
+      source_xml_url TEXT,
+      normalized_url TEXT,
+      normalized_url_hash TEXT,
+      feed_id INT REFERENCES feeds(id) ON DELETE SET NULL,
+      item_status TEXT NOT NULL CHECK (item_status IN ('new', 'existing', 'duplicate', 'invalid', 'imported', 'failed')),
+      validation_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT opml_import_items_normalized_url_required
+        CHECK (item_status = 'invalid' OR (normalized_url IS NOT NULL AND normalized_url_hash IS NOT NULL))
+    )`,
+    `CREATE UNIQUE INDEX idx_opml_import_items_dedupe_per_import
+      ON opml_import_items (import_id, normalized_url_hash)
+      WHERE normalized_url_hash IS NOT NULL AND item_status <> 'duplicate'`,
   ];
 
   for (const statement of schema) {
@@ -186,8 +259,12 @@ describe('vertical slice integration', () => {
   let scheduleDueFeedsUseCase: ScheduleDueFeedsUseCase;
   let processFeedJobUseCase: ProcessFeedJobUseCase;
   let processAlertDeliveryUseCase: ProcessAlertDeliveryUseCase;
+  let processOpmlParseJobUseCase: ProcessOpmlParseJobUseCase;
+  let processOpmlApplyJobUseCase: ProcessOpmlApplyJobUseCase;
   let fakeQueue: FakeQueue;
   let fakeAlertDeliveryQueue: FakeAlertDeliveryQueue;
+  let fakeOpmlParseQueue: FakeOpmlParseQueue;
+  let fakeOpmlApplyQueue: FakeOpmlApplyQueue;
   let fakeAlertNotifier: FakeAlertNotifier;
 
   beforeAll(async () => {
@@ -198,6 +275,8 @@ describe('vertical slice integration', () => {
 
     fakeQueue = new FakeQueue();
     fakeAlertDeliveryQueue = new FakeAlertDeliveryQueue();
+    fakeOpmlParseQueue = new FakeOpmlParseQueue();
+    fakeOpmlApplyQueue = new FakeOpmlApplyQueue();
     fakeAlertNotifier = new FakeAlertNotifier();
 
     const moduleRef = await Test.createTestingModule({
@@ -215,6 +294,14 @@ describe('vertical slice integration', () => {
       .useValue(fakeAlertDeliveryQueue)
       .overrideProvider(AlertDeliveryQueue)
       .useValue(fakeAlertDeliveryQueue)
+      .overrideProvider(OPML_PARSE_PREVIEW_QUEUE_TOKEN)
+      .useValue(fakeOpmlParseQueue)
+      .overrideProvider(OpmlParsePreviewQueue)
+      .useValue(fakeOpmlParseQueue)
+      .overrideProvider(OPML_APPLY_IMPORT_QUEUE_TOKEN)
+      .useValue(fakeOpmlApplyQueue)
+      .overrideProvider(OpmlApplyImportQueue)
+      .useValue(fakeOpmlApplyQueue)
       .overrideProvider(FEED_FETCHER)
       .useValue(new FakeFeedFetcher())
       .overrideProvider(ALERT_NOTIFIER)
@@ -228,6 +315,8 @@ describe('vertical slice integration', () => {
     scheduleDueFeedsUseCase = moduleRef.get(ScheduleDueFeedsUseCase);
     processFeedJobUseCase = moduleRef.get(ProcessFeedJobUseCase);
     processAlertDeliveryUseCase = moduleRef.get(ProcessAlertDeliveryUseCase);
+    processOpmlParseJobUseCase = moduleRef.get(ProcessOpmlParseJobUseCase);
+    processOpmlApplyJobUseCase = moduleRef.get(ProcessOpmlApplyJobUseCase);
   });
 
   afterAll(async () => {
@@ -401,6 +490,53 @@ describe('vertical slice integration', () => {
       .expect((response) => {
         expect(response.body.data.status).toBe('paused');
       });
+  });
+
+  it('runs OPML happy path upload -> preview -> confirm -> status', async () => {
+    const opml = `<?xml version="1.0" encoding="UTF-8"?>
+      <opml version="2.0">
+        <body>
+          <outline text="Tech">
+            <outline text="AI Feed" xmlUrl="https://example.com/opml-ai.xml" />
+            <outline text="AI Feed duplicate" xmlUrl="https://example.com/opml-ai.xml" />
+            <outline text="Invalid" xmlUrl="ftp://example.com/nope.xml" />
+          </outline>
+        </body>
+      </opml>`;
+
+    const uploadResponse = await request(app.getHttpServer())
+      .post('/api/v1/opml/imports')
+      .attach('file', Buffer.from(opml, 'utf8'), {
+        filename: 'feeds.opml',
+        contentType: 'text/x-opml',
+      })
+      .expect(201);
+
+    const importId = Number(uploadResponse.body.data.id);
+    expect(importId).toBeGreaterThan(0);
+    expect(fakeOpmlParseQueue.jobs).toHaveLength(1);
+
+    await processOpmlParseJobUseCase.execute(fakeOpmlParseQueue.jobs[0]);
+
+    const previewResponse = await request(app.getHttpServer()).get(`/api/v1/opml/imports/${importId}/preview`).expect(200);
+    expect(previewResponse.body.summary.status).toBe('preview_ready');
+    expect(previewResponse.body.summary.totalItems).toBe(3);
+    expect(previewResponse.body.summary.duplicateItems).toBe(1);
+    expect(previewResponse.body.summary.invalidItems).toBe(1);
+
+    const confirmResponse = await request(app.getHttpServer()).post(`/api/v1/opml/imports/${importId}/confirm`).expect(202);
+    expect(confirmResponse.body.data.status).toBe('queued');
+    expect(fakeOpmlApplyQueue.jobs).toHaveLength(1);
+
+    await processOpmlApplyJobUseCase.execute(fakeOpmlApplyQueue.jobs[0]);
+
+    const statusResponse = await request(app.getHttpServer()).get(`/api/v1/opml/imports/${importId}/status`).expect(200);
+    expect(statusResponse.body.data.status).toBe('completed');
+    expect(statusResponse.body.data.importedItems).toBe(1);
+    expect(statusResponse.body.data.progressPercent).toBe(100);
+
+    const secondConfirm = await request(app.getHttpServer()).post(`/api/v1/opml/imports/${importId}/confirm`).expect(202);
+    expect(secondConfirm.body.data.status).toBe('already_confirmed');
   });
 
   it('exposes Swagger UI and OpenAPI JSON for the running API surface', async () => {

@@ -7,6 +7,7 @@ import { AlertsModule } from '../alerts/alerts.module';
 import { EntriesModule } from '../entries/entries.module';
 import { FeedsModule } from '../feeds/feeds.module';
 import { ObservabilityModule } from '../observability/observability.module';
+import { OpmlImportsModule } from '../opml-imports/opml-imports.module';
 import { RulesModule } from '../rules/rules.module';
 
 import { ProcessFeedJobUseCase } from './application/process-feed-job.use-case';
@@ -20,7 +21,7 @@ import { WorkerRunner } from './worker.runner';
 import { MetricsService } from '../observability/metrics.service';
 
 @Module({
-  imports: [AppConfigModule, FeedsModule, EntriesModule, RulesModule, AlertsModule, ObservabilityModule],
+  imports: [AppConfigModule, FeedsModule, EntriesModule, RulesModule, AlertsModule, ObservabilityModule, OpmlImportsModule],
   providers: [
     ScheduleDueFeedsUseCase,
     ProcessFeedJobUseCase,

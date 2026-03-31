@@ -79,6 +79,31 @@ export class RulesRepository {
     return result.rows.map(mapRule);
   }
 
+  async findByName(name: string): Promise<Rule | null> {
+    const result = await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE name = $1 LIMIT 1', [name]);
+    return result.rows[0] ? mapRule(result.rows[0]) : null;
+  }
+
+  async upsertByName(input: { name: string; includeKeywords: string[]; excludeKeywords: string[]; isActive: boolean }): Promise<Rule> {
+    const existing = await this.findByName(input.name);
+    if (!existing) {
+      return this.create(input);
+    }
+
+    const updated = await this.update({
+      id: existing.id,
+      includeKeywords: input.includeKeywords,
+      excludeKeywords: input.excludeKeywords,
+      isActive: input.isActive,
+    });
+
+    if (!updated) {
+      throw new Error('rule_upsert_failed');
+    }
+
+    return updated;
+  }
+
   async findById(id: number): Promise<Rule | null> {
     const result = await this.databaseService.query<RuleRow>('SELECT * FROM rules WHERE id = $1', [id]);
     return result.rows[0] ? mapRule(result.rows[0]) : null;
