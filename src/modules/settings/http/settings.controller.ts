@@ -10,6 +10,7 @@ import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context'
 import { GetSettingsUseCase } from '../application/get-settings.use-case';
 import { UpdateSettingsUseCase } from '../application/update-settings.use-case';
 import { UpdateSettingsDto } from '../dto/update-settings.dto';
+import { DEFAULT_TELEGRAM_DELIVERY_MODE } from '../settings.types';
 
 @ApiTags('Settings')
 @Controller('api/v1/settings')
@@ -37,10 +38,14 @@ export class SettingsController {
     const tenantId = resolveTenantIdFromRequest(request);
     const webhookNotifierUrl = payload.webhook_notifier_url === undefined ? null : payload.webhook_notifier_url;
     const recipientEmails = payload.recipient_emails === undefined ? [] : payload.recipient_emails;
+    const telegramChatIds = payload.telegram_chat_ids === undefined ? [] : payload.telegram_chat_ids;
+    const telegramDeliveryMode = payload.telegram_delivery_mode ?? DEFAULT_TELEGRAM_DELIVERY_MODE;
     const settings = await this.updateSettingsUseCase.execute({
       tenantId,
       webhookNotifierUrl,
       recipientEmails,
+      telegramChatIds,
+      telegramDeliveryMode,
     });
 
     return successResponse(request, settings);

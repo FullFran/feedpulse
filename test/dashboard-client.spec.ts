@@ -161,6 +161,8 @@ function createHarness(responses: MockResponse[]) {
     'settings-form',
     'settings-webhook-url',
     'settings-recipient-emails',
+    'settings-telegram-chat-ids',
+    'settings-telegram-mode',
     'settings-save',
     'settings-clear',
     'settings-refresh',
@@ -316,9 +318,36 @@ describe('dashboard client', () => {
   it('loads and updates webhook settings from dashboard tab', async () => {
     const responses = [
       ...fullRefreshResponses(),
-      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/old', recipientEmails: ['old@example.com'] } } },
-      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/new', recipientEmails: ['alerts@example.com', 'ops@example.com'] } } },
-      { body: { data: { webhookNotifierUrl: 'https://hooks.example.com/new', recipientEmails: ['alerts@example.com', 'ops@example.com'] } } },
+      {
+        body: {
+          data: {
+            webhookNotifierUrl: 'https://hooks.example.com/old',
+            recipientEmails: ['old@example.com'],
+            telegramChatIds: ['-10010'],
+            telegramDeliveryMode: 'instant',
+          },
+        },
+      },
+      {
+        body: {
+          data: {
+            webhookNotifierUrl: 'https://hooks.example.com/new',
+            recipientEmails: ['alerts@example.com', 'ops@example.com'],
+            telegramChatIds: ['-10020', '123456'],
+            telegramDeliveryMode: 'digest_10m',
+          },
+        },
+      },
+      {
+        body: {
+          data: {
+            webhookNotifierUrl: 'https://hooks.example.com/new',
+            recipientEmails: ['alerts@example.com', 'ops@example.com'],
+            telegramChatIds: ['-10020', '123456'],
+            telegramDeliveryMode: 'digest_10m',
+          },
+        },
+      },
     ];
 
     const harness = createHarness(responses);
@@ -328,7 +357,9 @@ describe('dashboard client', () => {
     const settingsForm = harness.elements.get('settings-form');
     const settingsInput = harness.elements.get('settings-webhook-url');
     const settingsRecipientEmails = harness.elements.get('settings-recipient-emails');
-    if (!apiKey || !saveKey || !settingsRefresh || !settingsForm || !settingsInput || !settingsRecipientEmails)
+    const settingsTelegramChatIds = harness.elements.get('settings-telegram-chat-ids');
+    const settingsTelegramMode = harness.elements.get('settings-telegram-mode');
+    if (!apiKey || !saveKey || !settingsRefresh || !settingsForm || !settingsInput || !settingsRecipientEmails || !settingsTelegramChatIds || !settingsTelegramMode)
       throw new Error('missing element');
 
     await flush();
@@ -344,9 +375,13 @@ describe('dashboard client', () => {
     await flush();
     expect(settingsInput.value).toBe('https://hooks.example.com/old');
     expect(settingsRecipientEmails.value).toBe('old@example.com');
+    expect(settingsTelegramChatIds.value).toBe('-10010');
+    expect(settingsTelegramMode.value).toBe('instant');
 
     settingsInput.value = 'https://hooks.example.com/new';
     settingsRecipientEmails.value = 'alerts@example.com, OPS@example.com\nalerts@example.com';
+    settingsTelegramChatIds.value = '-10020, 123456\ninvalid_id\n123456';
+    settingsTelegramMode.value = 'digest_10m';
     const submit = settingsForm.listeners.get('submit');
     if (!submit) throw new Error('settings submit listener missing');
     await submit({ preventDefault: () => undefined });
@@ -361,6 +396,8 @@ describe('dashboard client', () => {
     expect(JSON.parse(putOptions.body)).toEqual({
       webhook_notifier_url: 'https://hooks.example.com/new',
       recipient_emails: ['alerts@example.com', 'ops@example.com'],
+      telegram_chat_ids: ['-10020', '123456'],
+      telegram_delivery_mode: 'digest_10m',
     });
     expect(putOptions.headers.Authorization).toBe('Bearer ak_test');
   });

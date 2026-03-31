@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnApplicationShutdown } from '@nestjs/common';
 
 import { AppConfigService } from '../../shared/config/app-config.service';
+import { ProcessTelegramDigestsUseCase } from '../alerts/application/process-telegram-digests.use-case';
 
 import { ScheduleDueFeedsUseCase } from './application/schedule-due-feeds.use-case';
 
@@ -11,6 +12,7 @@ export class SchedulerRunner implements OnApplicationShutdown {
 
   constructor(
     private readonly scheduleDueFeedsUseCase: ScheduleDueFeedsUseCase,
+    private readonly processTelegramDigestsUseCase: ProcessTelegramDigestsUseCase,
     @Inject(AppConfigService) private readonly appConfigService: AppConfigService,
   ) {}
 
@@ -28,6 +30,16 @@ export class SchedulerRunner implements OnApplicationShutdown {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown scheduler failure';
       this.logger.error(`Scheduler tick failed: ${message}`);
+    }
+
+    try {
+      const digest = await this.processTelegramDigestsUseCase.execute();
+      if (digest.processedGroups > 0) {
+        this.logger.log(`Sent ${digest.processedGroups} telegram digest group(s) with ${digest.sentItems} item(s)`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown telegram digest scheduler failure';
+      this.logger.error(`Telegram digest tick failed: ${message}`);
     }
   }
 

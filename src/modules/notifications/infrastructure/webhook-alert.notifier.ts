@@ -2,11 +2,13 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { AppConfigService } from '../../../shared/config/app-config.service';
 
-import { AlertNotificationPayload, AlertNotifierPort } from '../domain/alert-notifier.port';
+import { AlertNotificationPayload, AlertNotifierPort, TelegramDigestPayload } from '../domain/alert-notifier.port';
 
 const EMAIL_SUBJECT_MAX_LENGTH = 120;
 const EMAIL_TITLE_MAX_LENGTH = 70;
 const EMAIL_SUMMARY_MAX_LENGTH = 260;
+const TELEGRAM_TITLE_MAX_LENGTH = 120;
+const TELEGRAM_SNIPPET_MAX_LENGTH = 180;
 
 @Injectable()
 export class WebhookAlertNotifier implements AlertNotifierPort {
@@ -18,6 +20,10 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
 
   isEmailEnabled(): boolean {
     return Boolean(this.appConfigService.resendApiKey && this.appConfigService.resendFromEmail);
+  }
+
+  isTelegramEnabled(): boolean {
+    return Boolean(this.appConfigService.telegramBotToken);
   }
 
   async sendWebhook(alert: AlertNotificationPayload, destinationUrl: string): Promise<void> {
@@ -70,6 +76,41 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     if (!response.ok) {
       throw new Error(`email_delivery_failed_${response.status}`);
     }
+  }
+
+  async sendTelegram(alert: AlertNotificationPayload, chatId: string): Promise<void> {
+    const title = this.truncate(alert.entry.title?.trim() || 'Alerta sin título', TELEGRAM_TITLE_MAX_LENGTH);
+    const snippet = this.summarizeTelegramContent(alert.entry.content);
+    const lines = [
+      `📰 *Nueva alerta*`,
+      `*${this.escapeTelegramMarkdown(title)}*`,
+      snippet ? this.escapeTelegramMarkdown(snippet) : null,
+      alert.entry.link ? `🔗 ${alert.entry.link}` : null,
+    ].filter(Boolean) as string[];
+
+    await this.sendTelegramMessage(chatId, lines.join('\n'));
+  }
+
+  async sendTelegramDigest(payload: TelegramDigestPayload): Promise<void> {
+    const lines: string[] = [`📬 *Resumen de alertas (${payload.items.length})*`, this.escapeTelegramMarkdown(payload.windowLabel)];
+
+    payload.items.slice(0, 12).forEach((item, index) => {
+      const title = this.truncate(item.title?.trim() || 'Sin título', TELEGRAM_TITLE_MAX_LENGTH);
+      const snippet = this.summarizeTelegramContent(item.snippet);
+      lines.push(`${index + 1}. *${this.escapeTelegramMarkdown(title)}*`);
+      if (snippet) {
+        lines.push(`   ${this.escapeTelegramMarkdown(snippet)}`);
+      }
+      if (item.link) {
+        lines.push(`   🔗 ${item.link}`);
+      }
+    });
+
+    if (payload.items.length > 12) {
+      lines.push(`…y ${payload.items.length - 12} alerta(s) más.`);
+    }
+
+    await this.sendTelegramMessage(payload.chatId, lines.join('\n'));
   }
 
   private buildAlertEmail(alert: AlertNotificationPayload): { subject: string; text: string; html: string } {
@@ -164,6 +205,51 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     return this.truncate(compact, EMAIL_SUMMARY_MAX_LENGTH);
   }
 
+  private summarizeTelegramContent(content: string | null): string | null {
+    if (!content) {
+      return null;
+    }
+
+    const compact = content.replaceAll(/\s+/g, ' ').trim();
+    if (!compact) {
+      return null;
+    }
+
+    return this.truncate(compact, TELEGRAM_SNIPPET_MAX_LENGTH);
+  }
+
+  private async sendTelegramMessage(chatId: string, text: string): Promise<void> {
+    const token = this.appConfigService.telegramBotToken;
+    if (!token) {
+      throw new Error('telegram_notifier_disabled');
+    }
+
+    const baseUrl = this.appConfigService.telegramApiUrl.replace(/\/$/, '');
+    const url = `${baseUrl}/bot${token}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'MarkdownV2',
+        disable_web_page_preview: true,
+      }),
+      signal: AbortSignal.timeout(this.appConfigService.webhookNotifierTimeoutMs),
+    });
+
+    if (!response.ok) {
+      throw new Error(`telegram_delivery_failed_${response.status}`);
+    }
+
+    const json = (await response.json().catch(() => null)) as { ok?: boolean } | null;
+    if (json && json.ok === false) {
+      throw new Error('telegram_delivery_failed_api_error');
+    }
+  }
+
   private escapeHtml(value: string): string {
     return value
       .replaceAll('&', '&amp;')
@@ -171,5 +257,9 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
+  }
+
+  private escapeTelegramMarkdown(value: string): string {
+    return value.replaceAll(/([_\-*\[\]()~`>#+=|{}.!])/g, '\\$1');
   }
 }

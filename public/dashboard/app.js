@@ -84,6 +84,17 @@ function parseRecipientEmails(value) {
   );
 }
 
+function parseTelegramChatIds(value) {
+  return Array.from(
+    new Set(
+      String(value || '')
+        .split(/[\n,]/g)
+        .map((part) => part.trim())
+        .filter((part) => /^-?\d+$/.test(part)),
+    ),
+  );
+}
+
 function setFeedback(id, text, tone = 'info') {
   const node = getById(id);
   node.textContent = text;
@@ -758,9 +769,13 @@ async function loadSettings() {
     const payload = await api('/api/v1/settings');
     const webhookUrl = payload.data?.webhookNotifierUrl || '';
     const recipientEmails = payload.data?.recipientEmails || [];
+    const telegramChatIds = payload.data?.telegramChatIds || [];
+    const telegramDeliveryMode = payload.data?.telegramDeliveryMode || 'instant';
     getById('settings-webhook-url').value = webhookUrl;
     getById('settings-recipient-emails').value = recipientEmails.join('\n');
-    setFeedback('settings-feedback', webhookUrl ? 'Webhook configurado.' : 'Webhook deshabilitado.', 'info');
+    getById('settings-telegram-chat-ids').value = telegramChatIds.join('\n');
+    getById('settings-telegram-mode').value = telegramDeliveryMode;
+    setFeedback('settings-feedback', 'Configuración cargada correctamente.', 'info');
   } catch (error) {
     setFeedback('settings-feedback', `Error cargando settings: ${error.message}`, 'error');
   }
@@ -772,12 +787,20 @@ async function saveSettings(event) {
     await requireAuth();
     const raw = getById('settings-webhook-url').value.trim();
     const recipientEmails = parseRecipientEmails(getById('settings-recipient-emails').value);
+    const telegramChatIds = parseTelegramChatIds(getById('settings-telegram-chat-ids').value);
+    const telegramModeRaw = getById('settings-telegram-mode').value;
+    const telegramDeliveryMode = telegramModeRaw === 'digest_10m' ? 'digest_10m' : 'instant';
     await api('/api/v1/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ webhook_notifier_url: raw || null, recipient_emails: recipientEmails }),
+      body: JSON.stringify({
+        webhook_notifier_url: raw || null,
+        recipient_emails: recipientEmails,
+        telegram_chat_ids: telegramChatIds,
+        telegram_delivery_mode: telegramDeliveryMode,
+      }),
     });
-    setFeedback('settings-feedback', 'Settings actualizados.', 'success');
+    setFeedback('settings-feedback', 'Configuración guardada con éxito.', 'success');
     await loadSettings();
   } catch (error) {
     setFeedback('settings-feedback', `Error guardando settings: ${error.message}`, 'error');
@@ -790,13 +813,20 @@ async function clearSettings() {
     await api('/api/v1/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ webhook_notifier_url: null, recipient_emails: [] }),
+      body: JSON.stringify({
+        webhook_notifier_url: null,
+        recipient_emails: [],
+        telegram_chat_ids: [],
+        telegram_delivery_mode: 'instant',
+      }),
     });
     getById('settings-webhook-url').value = '';
     getById('settings-recipient-emails').value = '';
-    setFeedback('settings-feedback', 'Webhook deshabilitado para este tenant.', 'success');
+    getById('settings-telegram-chat-ids').value = '';
+    getById('settings-telegram-mode').value = 'instant';
+    setFeedback('settings-feedback', 'Canales limpiados para este tenant.', 'success');
   } catch (error) {
-    setFeedback('settings-feedback', `Error deshabilitando webhook: ${error.message}`, 'error');
+    setFeedback('settings-feedback', `Error limpiando canales: ${error.message}`, 'error');
   }
 }
 

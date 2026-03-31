@@ -32,7 +32,8 @@ import {
   REDIS_CONNECTION,
 } from '../src/infrastructure/queue/queue.constants';
 import { ProcessAlertDeliveryUseCase } from '../src/modules/alerts/application/process-alert-delivery.use-case';
-import { ALERT_NOTIFIER, AlertNotificationPayload, AlertNotifierPort } from '../src/modules/notifications/domain/alert-notifier.port';
+import { ProcessTelegramDigestsUseCase } from '../src/modules/alerts/application/process-telegram-digests.use-case';
+import { ALERT_NOTIFIER, AlertNotificationPayload, AlertNotifierPort, TelegramDigestPayload } from '../src/modules/notifications/domain/alert-notifier.port';
 import { configureApiApplication } from '../src/main/create-api-app';
 import { ClerkSessionVerifierService } from '../src/shared/auth/clerk-session-verifier.service';
 
@@ -55,6 +56,8 @@ class FakeRedis {
 class CapturingNotifier implements AlertNotifierPort {
   readonly webhookDeliveries: Array<{ alertId: string; destinationUrl: string; tenantId: string }> = [];
   readonly emailDeliveries: Array<{ alertId: string; recipients: string[]; tenantId: string }> = [];
+  readonly telegramDeliveries: Array<{ alertId: string; chatId: string; tenantId: string }> = [];
+  readonly telegramDigestDeliveries: TelegramDigestPayload[] = [];
 
   isEnabled(): boolean {
     return true;
@@ -64,12 +67,24 @@ class CapturingNotifier implements AlertNotifierPort {
     return true;
   }
 
+  isTelegramEnabled(): boolean {
+    return true;
+  }
+
   async sendWebhook(alert: AlertNotificationPayload, destinationUrl: string): Promise<void> {
     this.webhookDeliveries.push({ alertId: alert.id, destinationUrl, tenantId: alert.tenantId });
   }
 
   async sendEmail(alert: AlertNotificationPayload, recipientEmails: string[]): Promise<void> {
     this.emailDeliveries.push({ alertId: alert.id, recipients: recipientEmails, tenantId: alert.tenantId });
+  }
+
+  async sendTelegram(alert: AlertNotificationPayload, chatId: string): Promise<void> {
+    this.telegramDeliveries.push({ alertId: alert.id, chatId, tenantId: alert.tenantId });
+  }
+
+  async sendTelegramDigest(payload: TelegramDigestPayload): Promise<void> {
+    this.telegramDigestDeliveries.push(payload);
   }
 }
 
@@ -86,6 +101,8 @@ async function bootstrapSchema(pool: { query: (sql: string, values?: unknown[]) 
       tenant_id TEXT PRIMARY KEY,
       webhook_notifier_url TEXT,
       recipient_emails TEXT[] NOT NULL DEFAULT '{}',
+      telegram_chat_ids TEXT[] NOT NULL DEFAULT '{}',
+      telegram_delivery_mode TEXT NOT NULL DEFAULT 'instant',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
@@ -139,6 +156,16 @@ async function bootstrapSchema(pool: { query: (sql: string, values?: unknown[]) 
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (entry_id, rule_id)
     )`,
+    `CREATE TABLE telegram_digest_items (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      alert_id BIGINT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+      chat_id TEXT NOT NULL,
+      scheduled_for TIMESTAMPTZ NOT NULL,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (alert_id, chat_id)
+    )`,
     `CREATE TABLE fetch_logs (
       id BIGSERIAL PRIMARY KEY,
       feed_id INT NOT NULL REFERENCES feeds(id),
@@ -184,6 +211,7 @@ describe('settings + auth integration', () => {
   let app: INestApplication;
   let pool: { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> };
   let processAlertDeliveryUseCase: ProcessAlertDeliveryUseCase;
+  let processTelegramDigestsUseCase: ProcessTelegramDigestsUseCase;
   let capturingNotifier: CapturingNotifier;
 
   beforeAll(async () => {
@@ -227,6 +255,7 @@ describe('settings + auth integration', () => {
     await app.init();
 
     processAlertDeliveryUseCase = moduleRef.get(ProcessAlertDeliveryUseCase);
+    processTelegramDigestsUseCase = moduleRef.get(ProcessTelegramDigestsUseCase);
   });
 
   afterAll(async () => {
@@ -240,26 +269,37 @@ describe('settings + auth integration', () => {
     await request(app.getHttpServer())
       .put('/api/v1/settings')
       .set('x-api-key', tenantA)
-      .send({ webhook_notifier_url: 'https://hooks.a.example/path', recipient_emails: ['alerts@A.example', 'alerts@a.example'] })
+      .send({
+        webhook_notifier_url: 'https://hooks.a.example/path',
+        recipient_emails: ['alerts@A.example', 'alerts@a.example'],
+        telegram_chat_ids: ['-1001', '-1001', '555'],
+        telegram_delivery_mode: 'digest_10m',
+      })
       .expect(200);
 
     const getA = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantA).expect(200);
     expect(getA.body.data.webhookNotifierUrl).toBe('https://hooks.a.example/path');
     expect(getA.body.data.recipientEmails).toEqual(['alerts@a.example']);
+    expect(getA.body.data.telegramChatIds).toEqual(['-1001', '555']);
+    expect(getA.body.data.telegramDeliveryMode).toBe('digest_10m');
 
     const getB = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantB).expect(200);
     expect(getB.body.data.webhookNotifierUrl).toBeNull();
     expect(getB.body.data.recipientEmails).toEqual([]);
+    expect(getB.body.data.telegramChatIds).toEqual([]);
+    expect(getB.body.data.telegramDeliveryMode).toBe('instant');
 
     await request(app.getHttpServer())
       .put('/api/v1/settings')
       .set('x-api-key', tenantA)
-      .send({ webhook_notifier_url: null, recipient_emails: [] })
+      .send({ webhook_notifier_url: null, recipient_emails: [], telegram_chat_ids: [], telegram_delivery_mode: 'instant' })
       .expect(200);
 
     const cleared = await request(app.getHttpServer()).get('/api/v1/settings').set('x-api-key', tenantA).expect(200);
     expect(cleared.body.data.webhookNotifierUrl).toBeNull();
     expect(cleared.body.data.recipientEmails).toEqual([]);
+    expect(cleared.body.data.telegramChatIds).toEqual([]);
+    expect(cleared.body.data.telegramDeliveryMode).toBe('instant');
   });
 
   it('accepts clerk bearer token path and maps tenant deterministically', async () => {
@@ -268,7 +308,12 @@ describe('settings + auth integration', () => {
     await request(app.getHttpServer())
       .put('/api/v1/settings')
       .set('Authorization', `Bearer ${fakeJwt}`)
-      .send({ webhook_notifier_url: 'https://hooks.clerk.example/path', recipient_emails: ['ops@clerk.example'] })
+      .send({
+        webhook_notifier_url: 'https://hooks.clerk.example/path',
+        recipient_emails: ['ops@clerk.example'],
+        telegram_chat_ids: ['99999'],
+        telegram_delivery_mode: 'instant',
+      })
       .expect(200);
 
     const viaClerk = await request(app.getHttpServer())
@@ -278,6 +323,8 @@ describe('settings + auth integration', () => {
 
     expect(viaClerk.body.data.webhookNotifierUrl).toBe('https://hooks.clerk.example/path');
     expect(viaClerk.body.data.recipientEmails).toEqual(['ops@clerk.example']);
+    expect(viaClerk.body.data.telegramChatIds).toEqual(['99999']);
+    expect(viaClerk.body.data.telegramDeliveryMode).toBe('instant');
   });
 
   it('validates recipient email list format on settings updates', async () => {
@@ -285,6 +332,14 @@ describe('settings + auth integration', () => {
       .put('/api/v1/settings')
       .set('x-api-key', 'ak_invalid_emails')
       .send({ recipient_emails: ['valid@example.com', 'not-an-email'] })
+      .expect(400);
+  });
+
+  it('validates telegram delivery mode and chat ids on settings updates', async () => {
+    await request(app.getHttpServer())
+      .put('/api/v1/settings')
+      .set('x-api-key', 'ak_invalid_telegram_mode')
+      .send({ telegram_chat_ids: ['-1001'], telegram_delivery_mode: 'hourly' })
       .expect(400);
   });
 
@@ -308,5 +363,59 @@ describe('settings + auth integration', () => {
     expect(capturingNotifier.webhookDeliveries[0].tenantId).toBe('ak_alert_tenant');
     expect(capturingNotifier.emailDeliveries).toHaveLength(1);
     expect(capturingNotifier.emailDeliveries[0].recipients).toEqual(['alerts@example.com']);
+  });
+
+  it('sends telegram immediately when mode is instant', async () => {
+    await pool.query(`INSERT INTO feeds (id, tenant_id, url) VALUES (31, 'ak_telegram_instant', 'https://example.com/rss.xml')`);
+    await pool.query(
+      `INSERT INTO entries (id, tenant_id, feed_id, title, link, content, content_hash) VALUES (310, 'ak_telegram_instant', 31, 'Título TG', 'https://example.com/tg', 'Resumen TG', 'hash_tg_1')`,
+    );
+    await pool.query(
+      `INSERT INTO rules (id, tenant_id, name, include_keywords, exclude_keywords, is_active) VALUES (305, 'ak_telegram_instant', 'Rule TG', ARRAY['ia'], ARRAY[]::text[], true)`,
+    );
+    await pool.query(`INSERT INTO alerts (id, tenant_id, entry_id, rule_id) VALUES (320, 'ak_telegram_instant', 310, 305)`);
+    await pool.query(
+      `INSERT INTO tenant_settings (tenant_id, webhook_notifier_url, recipient_emails, telegram_chat_ids, telegram_delivery_mode)
+       VALUES ('ak_telegram_instant', null, ARRAY[]::text[], ARRAY['-100200'], 'instant')`,
+    );
+
+    await processAlertDeliveryUseCase.execute({ alertId: 320, attemptNumber: 1, willRetry: false });
+
+    expect(capturingNotifier.telegramDeliveries.some((d) => String(d.alertId) === '320' && d.chatId === '-100200')).toBe(true);
+  });
+
+  it('queues and sends grouped telegram digest when mode is digest_10m', async () => {
+    await pool.query(`INSERT INTO feeds (id, tenant_id, url) VALUES (41, 'ak_telegram_digest', 'https://example.com/rss.xml')`);
+    await pool.query(
+      `INSERT INTO entries (id, tenant_id, feed_id, title, link, content, content_hash) VALUES
+      (410, 'ak_telegram_digest', 41, 'Título A', 'https://example.com/a', 'Resumen A', 'hash_tg_a'),
+      (411, 'ak_telegram_digest', 41, 'Título B', 'https://example.com/b', 'Resumen B', 'hash_tg_b')`,
+    );
+    await pool.query(
+      `INSERT INTO rules (id, tenant_id, name, include_keywords, exclude_keywords, is_active) VALUES (405, 'ak_telegram_digest', 'Rule TG digest', ARRAY['ia'], ARRAY[]::text[], true)`,
+    );
+    await pool.query(
+      `INSERT INTO alerts (id, tenant_id, entry_id, rule_id) VALUES
+      (420, 'ak_telegram_digest', 410, 405),
+      (421, 'ak_telegram_digest', 411, 405)`,
+    );
+    await pool.query(
+      `INSERT INTO tenant_settings (tenant_id, webhook_notifier_url, recipient_emails, telegram_chat_ids, telegram_delivery_mode)
+       VALUES ('ak_telegram_digest', null, ARRAY[]::text[], ARRAY['-100300'], 'digest_10m')`,
+    );
+
+    await processAlertDeliveryUseCase.execute({ alertId: 420, attemptNumber: 1, willRetry: false });
+    await processAlertDeliveryUseCase.execute({ alertId: 421, attemptNumber: 1, willRetry: false });
+
+    const pending = await pool.query(`SELECT COUNT(*)::text AS count FROM telegram_digest_items WHERE tenant_id = 'ak_telegram_digest' AND sent_at IS NULL`);
+    expect(Number(pending.rows[0].count)).toBe(2);
+
+    const digestResult = await processTelegramDigestsUseCase.execute({ now: new Date(Date.now() + 15 * 60 * 1000) });
+    expect(digestResult.processedGroups).toBe(1);
+    expect(digestResult.sentItems).toBe(2);
+    expect(capturingNotifier.telegramDigestDeliveries.some((delivery) => delivery.chatId === '-100300' && delivery.items.length === 2)).toBe(true);
+
+    const sent = await pool.query(`SELECT COUNT(*)::text AS count FROM telegram_digest_items WHERE tenant_id = 'ak_telegram_digest' AND sent_at IS NOT NULL`);
+    expect(Number(sent.rows[0].count)).toBe(2);
   });
 });

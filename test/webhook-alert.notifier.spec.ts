@@ -31,6 +31,8 @@ describe('WebhookAlertNotifier.sendEmail', () => {
       resendFromEmail: 'alerts@example.com',
       webhookNotifierTimeoutMs: 1_000,
       webhookNotifierUrl: undefined,
+      telegramBotToken: 'tg_test_token',
+      telegramApiUrl: 'https://api.telegram.test',
     } as AppConfigService;
 
     return new WebhookAlertNotifier(appConfigService);
@@ -123,5 +125,41 @@ describe('WebhookAlertNotifier.sendEmail', () => {
 
     expect(payload.subject.length).toBeLessThanOrEqual(120);
     expect(payload.subject.endsWith('…')).toBe(true);
+  });
+
+  it('envía alerta instantánea por Telegram con formato compacto', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) } as unknown as Response);
+
+    const notifier = buildNotifier();
+    await notifier.sendTelegram(alert, '-100200');
+
+    const [url, options] = (global.fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.telegram.test/bottg_test_token/sendMessage');
+    const payload = JSON.parse(String(options.body)) as { chat_id: string; text: string; parse_mode: string };
+    expect(payload.chat_id).toBe('-100200');
+    expect(payload.parse_mode).toBe('MarkdownV2');
+    expect(payload.text).toContain('Nueva alerta');
+    expect(payload.text).toContain('https://example.com/post-1');
+  });
+
+  it('envía digest de Telegram agrupado', async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true }) } as unknown as Response);
+
+    const notifier = buildNotifier();
+    await notifier.sendTelegramDigest({
+      tenantId: 'tenant_demo',
+      chatId: '-100200',
+      windowLabel: 'Ventana hasta 31/03/2026, 12:40 UTC',
+      items: [
+        { title: 'Título A', snippet: 'Resumen A', link: 'https://example.com/a' },
+        { title: 'Título B', snippet: 'Resumen B', link: 'https://example.com/b' },
+      ],
+    });
+
+    const [, options] = (global.fetch as jest.Mock).mock.calls[0] as [string, RequestInit];
+    const payload = JSON.parse(String(options.body)) as { text: string };
+    expect(payload.text).toContain('Resumen de alertas (2)');
+    expect(payload.text).toContain('Título A');
+    expect(payload.text).toContain('https://example.com/b');
   });
 });

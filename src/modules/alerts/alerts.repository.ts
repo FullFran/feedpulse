@@ -46,6 +46,23 @@ interface AlertRow {
   rule_exclude_keywords: string[];
 }
 
+interface TelegramDigestPendingGroupRow {
+  tenant_id: string;
+  chat_id: string;
+}
+
+interface TelegramDigestItemRow {
+  digest_item_id: string;
+  tenant_id: string;
+  chat_id: string;
+  scheduled_for: Date;
+  alert_id: string;
+  alert_created_at: Date;
+  entry_title: string | null;
+  entry_link: string | null;
+  entry_content: string | null;
+}
+
 export interface CreatedAlert {
   id: string;
   entryId: string;
@@ -61,6 +78,26 @@ export interface AlertNotificationRecord extends AlertView {
     includeKeywords: string[];
     excludeKeywords: string[];
   };
+}
+
+export interface TelegramDigestGroup {
+  tenantId: string;
+  chatId: string;
+  scheduledFor: string;
+  items: Array<{
+    digestItemId: number;
+    alertId: string;
+    createdAt: string;
+    title: string | null;
+    link: string | null;
+    snippet: string | null;
+  }>;
+}
+
+function computeNextDigestWindow(now = new Date()): string {
+  const digestWindowMs = 10 * 60 * 1000;
+  const nextWindow = new Date(Math.ceil(now.getTime() / digestWindowMs) * digestWindowMs);
+  return nextWindow.toISOString();
 }
 
 function mapAlert(row: AlertRow): AlertNotificationRecord {
@@ -298,5 +335,101 @@ export class AlertsRepository {
       `,
       [id, input.willRetry ? 'retrying' : 'failed', input.attemptNumber, input.error],
     );
+  }
+
+  async queueTelegramDigestItems(input: { alertId: number; tenantId: string; chatIds: string[] }): Promise<void> {
+    if (!input.chatIds.length) {
+      return;
+    }
+
+    const scheduledFor = computeNextDigestWindow();
+    for (const chatId of input.chatIds) {
+      await this.databaseService.query(
+        `
+          INSERT INTO telegram_digest_items (tenant_id, alert_id, chat_id, scheduled_for)
+          VALUES ($1, $2, $3, $4::timestamptz)
+          ON CONFLICT (alert_id, chat_id) DO NOTHING
+        `,
+        [input.tenantId, input.alertId, chatId, scheduledFor],
+      );
+    }
+  }
+
+  async listDueTelegramDigestGroups(input: { nowIso: string; maxGroups: number }): Promise<TelegramDigestGroup[]> {
+    const groups = await this.databaseService.query<TelegramDigestPendingGroupRow>(
+      `
+        SELECT tenant_id, chat_id
+        FROM telegram_digest_items
+        WHERE sent_at IS NULL
+          AND scheduled_for <= $1
+        GROUP BY tenant_id, chat_id
+        ORDER BY MIN(scheduled_for) ASC
+        LIMIT $2
+      `,
+      [input.nowIso, input.maxGroups],
+    );
+
+    const result: TelegramDigestGroup[] = [];
+    for (const group of groups.rows) {
+      const itemsResult = await this.databaseService.query<TelegramDigestItemRow>(
+        `
+          SELECT tdi.id AS digest_item_id,
+                 tdi.tenant_id,
+                 tdi.chat_id,
+                 tdi.scheduled_for,
+                 a.id AS alert_id,
+                 a.created_at AS alert_created_at,
+                 e.title AS entry_title,
+                 e.link AS entry_link,
+                 e.content AS entry_content
+          FROM telegram_digest_items tdi
+          INNER JOIN alerts a ON a.id = tdi.alert_id
+          INNER JOIN entries e ON e.id = a.entry_id
+          WHERE tdi.tenant_id = $1
+            AND tdi.chat_id = $2
+            AND tdi.sent_at IS NULL
+            AND tdi.scheduled_for <= $3
+          ORDER BY tdi.created_at ASC, tdi.id ASC
+        `,
+        [group.tenant_id, group.chat_id, input.nowIso],
+      );
+
+      if (!itemsResult.rows.length) {
+        continue;
+      }
+
+      result.push({
+        tenantId: group.tenant_id,
+        chatId: group.chat_id,
+        scheduledFor: itemsResult.rows[0].scheduled_for.toISOString(),
+        items: itemsResult.rows.map((row) => ({
+          digestItemId: Number(row.digest_item_id),
+          alertId: row.alert_id,
+          createdAt: row.alert_created_at.toISOString(),
+          title: row.entry_title,
+          link: row.entry_link,
+          snippet: row.entry_content,
+        })),
+      });
+    }
+
+    return result;
+  }
+
+  async markTelegramDigestItemsSent(itemIds: number[]): Promise<void> {
+    if (!itemIds.length) {
+      return;
+    }
+
+    for (const itemId of itemIds) {
+      await this.databaseService.query(
+        `
+          UPDATE telegram_digest_items
+          SET sent_at = NOW()
+          WHERE id = $1
+        `,
+        [itemId],
+      );
+    }
   }
 }

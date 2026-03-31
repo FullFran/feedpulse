@@ -324,21 +324,51 @@
 
       <section id="tab-settings" class="tab-panel" hidden>
         <section class="panel">
-          <h2>Webhook notifier URL</h2>
-          <form id="settings-form" class="filters form-compact">
-            <label>
-              URL
-              <input id="settings-webhook-url" type="url" placeholder="https://hooks.example.com/rss-alerts">
-            </label>
-            <label>
-              Recipient emails (comma or newline separated)
-              <textarea id="settings-recipient-emails" rows="4" placeholder="alerts@example.com, ops@example.com"></textarea>
-            </label>
-            <button id="settings-save" type="submit">Guardar</button>
-            <button id="settings-clear" type="button">Deshabilitar webhook</button>
-            <button id="settings-refresh" type="button">Refrescar</button>
+          <h2>Canales de notificación</h2>
+          <p class="feedback">Configura por tenant cómo se envían alertas por Webhook, Email y Telegram.</p>
+          <p id="settings-feedback" class="feedback settings-banner" data-tone="info">Sin cambios pendientes.</p>
+
+          <form id="settings-form" class="settings-form">
+            <article class="settings-card">
+              <h3>Webhook</h3>
+              <p class="settings-help">Se envía cada alerta al endpoint configurado.</p>
+              <label>
+                URL del webhook
+                <input id="settings-webhook-url" type="url" placeholder="https://hooks.example.com/rss-alerts">
+              </label>
+            </article>
+
+            <article class="settings-card">
+              <h3>Email (Resend)</h3>
+              <p class="settings-help">Emails destino separados por coma o por línea.</p>
+              <label>
+                Destinatarios
+                <textarea id="settings-recipient-emails" rows="4" placeholder="alerts@example.com&#10;ops@example.com"></textarea>
+              </label>
+            </article>
+
+            <article class="settings-card">
+              <h3>Telegram</h3>
+              <p class="settings-help">IDs de chat separados por coma o línea. Modo aplica solo al canal Telegram.</p>
+              <label>
+                Chat IDs
+                <textarea id="settings-telegram-chat-ids" rows="4" placeholder="-1001234567890&#10;987654321"></textarea>
+              </label>
+              <label>
+                Modo de entrega Telegram
+                <select id="settings-telegram-mode">
+                  <option value="instant">Instantáneo (mensaje por alerta)</option>
+                  <option value="digest_10m">Resumen cada 10 minutos</option>
+                </select>
+              </label>
+            </article>
+
+            <div class="settings-actions">
+              <button id="settings-save" type="submit">Guardar cambios</button>
+              <button id="settings-clear" type="button">Limpiar canales</button>
+              <button id="settings-refresh" type="button">Recargar configuración</button>
+            </div>
           </form>
-          <p id="settings-feedback" class="feedback"></p>
         </section>
       </section>
     </main>

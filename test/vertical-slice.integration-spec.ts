@@ -38,7 +38,7 @@ import { ScheduleDueFeedsUseCase } from '../src/modules/ingestion/application/sc
 import { ProcessOpmlApplyJobUseCase } from '../src/modules/opml-imports/application/process-opml-apply-job.use-case';
 import { ProcessOpmlParseJobUseCase } from '../src/modules/opml-imports/application/process-opml-parse-job.use-case';
 import { FEED_FETCHER, FeedFetchResult } from '../src/modules/ingestion/domain/feed-fetcher.port';
-import { ALERT_NOTIFIER, AlertNotificationPayload, AlertNotifierPort } from '../src/modules/notifications/domain/alert-notifier.port';
+import { ALERT_NOTIFIER, AlertNotificationPayload, AlertNotifierPort, TelegramDigestPayload } from '../src/modules/notifications/domain/alert-notifier.port';
 import { configureApiApplication } from '../src/main/create-api-app';
 
 class FakeQueue {
@@ -147,6 +147,10 @@ class FakeAlertNotifier implements AlertNotifierPort {
     return false;
   }
 
+  isTelegramEnabled(): boolean {
+    return false;
+  }
+
   async sendWebhook(alert: AlertNotificationPayload, _destinationUrl: string): Promise<void> {
     if (this.failuresRemaining > 0) {
       this.failuresRemaining -= 1;
@@ -159,6 +163,14 @@ class FakeAlertNotifier implements AlertNotifierPort {
   async sendEmail(_alert: AlertNotificationPayload, _recipientEmails: string[]): Promise<void> {
     return undefined;
   }
+
+  async sendTelegram(_alert: AlertNotificationPayload, _chatId: string): Promise<void> {
+    return undefined;
+  }
+
+  async sendTelegramDigest(_payload: TelegramDigestPayload): Promise<void> {
+    return undefined;
+  }
 }
 
 async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unknown> }): Promise<void> {
@@ -168,6 +180,8 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       tenant_id TEXT PRIMARY KEY,
       webhook_notifier_url TEXT,
       recipient_emails TEXT[] NOT NULL DEFAULT '{}',
+      telegram_chat_ids TEXT[] NOT NULL DEFAULT '{}',
+      telegram_delivery_mode TEXT NOT NULL DEFAULT 'instant',
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
@@ -241,6 +255,16 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       last_delivery_queued_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (entry_id, rule_id)
+    )`,
+    `CREATE TABLE telegram_digest_items (
+      id BIGSERIAL PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      alert_id BIGINT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+      chat_id TEXT NOT NULL,
+      scheduled_for TIMESTAMPTZ NOT NULL,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (alert_id, chat_id)
     )`,
     `CREATE TABLE opml_imports (
       id BIGSERIAL PRIMARY KEY,

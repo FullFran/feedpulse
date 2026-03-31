@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { MetricsService } from '../../observability/metrics.service';
 import { ALERT_NOTIFIER, AlertNotifierPort } from '../../notifications/domain/alert-notifier.port';
 import { SettingsRepository } from '../../settings/settings.repository';
+import { DEFAULT_TELEGRAM_DELIVERY_MODE } from '../../settings/settings.types';
 import { AppConfigService } from '../../../shared/config/app-config.service';
 
 import { AlertsRepository } from '../alerts.repository';
@@ -33,10 +34,15 @@ export class ProcessAlertDeliveryUseCase {
     const tenantSettings = await this.settingsRepository.getByTenantId(alert.tenantId);
     const notifierUrl = tenantSettings?.webhookNotifierUrl ?? this.appConfigService.webhookNotifierUrl ?? null;
     const recipientEmails = tenantSettings?.recipientEmails ?? [];
+    const telegramChatIds = tenantSettings?.telegramChatIds ?? [];
+    const telegramDeliveryMode = tenantSettings?.telegramDeliveryMode ?? DEFAULT_TELEGRAM_DELIVERY_MODE;
     const shouldSendWebhook = Boolean(notifierUrl);
     const shouldSendEmail = recipientEmails.length > 0 && this.alertNotifier.isEmailEnabled();
+    const shouldSendTelegram = telegramChatIds.length > 0 && this.alertNotifier.isTelegramEnabled() && telegramDeliveryMode === 'instant';
+    const shouldQueueTelegramDigest =
+      telegramChatIds.length > 0 && this.alertNotifier.isTelegramEnabled() && telegramDeliveryMode === 'digest_10m';
 
-    if ((!shouldSendWebhook && !shouldSendEmail) || !this.alertNotifier.isEnabled()) {
+    if ((!shouldSendWebhook && !shouldSendEmail && !shouldSendTelegram && !shouldQueueTelegramDigest) || !this.alertNotifier.isEnabled()) {
       await this.alertsRepository.markDeliveryDisabled(input.alertId);
       return;
     }
@@ -60,6 +66,25 @@ export class ProcessAlertDeliveryUseCase {
           const message = error instanceof Error ? error.message : 'unknown_email_failure';
           channelErrors.push(`email:${message}`);
         }
+      }
+
+      if (shouldSendTelegram) {
+        for (const chatId of telegramChatIds) {
+          try {
+            await this.alertNotifier.sendTelegram(alert, chatId);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'unknown_telegram_failure';
+            channelErrors.push(`telegram:${chatId}:${message}`);
+          }
+        }
+      }
+
+      if (shouldQueueTelegramDigest) {
+        await this.alertsRepository.queueTelegramDigestItems({
+          alertId: input.alertId,
+          tenantId: alert.tenantId,
+          chatIds: telegramChatIds,
+        });
       }
 
       if (channelErrors.length > 0) {

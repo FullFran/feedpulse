@@ -64,6 +64,8 @@ export const envSchema = z.object({
   WEBHOOK_NOTIFIER_TIMEOUT_MS: z.coerce.number().int().positive().default(5000),
   RESEND_API_KEY: optionalString,
   RESEND_FROM_EMAIL: optionalEmail,
+  TELEGRAM_BOT_TOKEN: optionalString,
+  TELEGRAM_API_URL: z.url().default('https://api.telegram.org'),
   SCHEDULER_TICK_MS: z.coerce.number().int().positive().default(15000),
   SCHEDULER_BATCH_SIZE: z.coerce.number().int().positive().default(100),
   WORKER_CONCURRENCY: z.coerce.number().int().positive().default(5),

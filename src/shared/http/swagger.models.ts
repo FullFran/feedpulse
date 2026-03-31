@@ -226,6 +226,12 @@ export class TenantSettingsModel {
 
   @ApiProperty({ type: [String], example: ['alerts@example.com', 'ops@example.com'] })
   recipientEmails!: string[];
+
+  @ApiProperty({ type: [String], example: ['-1001234567890', '987654321'] })
+  telegramChatIds!: string[];
+
+  @ApiProperty({ enum: ['instant', 'digest_10m'], example: 'instant' })
+  telegramDeliveryMode!: 'instant' | 'digest_10m';
 }
 
 export class HealthCheckStatusModel {

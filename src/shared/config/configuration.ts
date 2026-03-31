@@ -9,6 +9,8 @@ export interface AppConfiguration {
   webhookNotifierTimeoutMs: number;
   resendApiKey?: string;
   resendFromEmail?: string;
+  telegramBotToken?: string;
+  telegramApiUrl: string;
   schedulerTickMs: number;
   schedulerBatchSize: number;
   workerConcurrency: number;
@@ -38,6 +40,8 @@ export const configuration = (env: Env): AppConfiguration => ({
   webhookNotifierTimeoutMs: env.WEBHOOK_NOTIFIER_TIMEOUT_MS,
   resendApiKey: env.RESEND_API_KEY,
   resendFromEmail: env.RESEND_FROM_EMAIL,
+  telegramBotToken: env.TELEGRAM_BOT_TOKEN,
+  telegramApiUrl: env.TELEGRAM_API_URL,
   schedulerTickMs: env.SCHEDULER_TICK_MS,
   schedulerBatchSize: env.SCHEDULER_BATCH_SIZE,
   workerConcurrency: env.WORKER_CONCURRENCY,

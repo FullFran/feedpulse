@@ -18,11 +18,25 @@ export interface AlertNotificationPayload {
   };
 }
 
+export interface TelegramDigestPayload {
+  tenantId: string;
+  chatId: string;
+  windowLabel: string;
+  items: Array<{
+    title: string | null;
+    snippet: string | null;
+    link: string | null;
+  }>;
+}
+
 export interface AlertNotifierPort {
   isEnabled(): boolean;
   isEmailEnabled(): boolean;
+  isTelegramEnabled(): boolean;
   sendWebhook(alert: AlertNotificationPayload, destinationUrl: string): Promise<void>;
   sendEmail(alert: AlertNotificationPayload, recipientEmails: string[]): Promise<void>;
+  sendTelegram(alert: AlertNotificationPayload, chatId: string): Promise<void>;
+  sendTelegramDigest(payload: TelegramDigestPayload): Promise<void>;
 }
 
 export const ALERT_NOTIFIER = Symbol('ALERT_NOTIFIER');

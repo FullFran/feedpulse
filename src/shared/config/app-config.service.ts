@@ -35,6 +35,14 @@ export class AppConfigService {
     return this.configService.get<string>('resendFromEmail', { infer: true });
   }
 
+  get telegramBotToken(): string | undefined {
+    return this.configService.get<string>('telegramBotToken', { infer: true });
+  }
+
+  get telegramApiUrl(): string {
+    return this.configService.get<string>('telegramApiUrl', { infer: true });
+  }
+
   get schedulerTickMs(): number {
     return this.configService.get<number>('schedulerTickMs', { infer: true });
   }

@@ -9,12 +9,13 @@ import { DeliverAlertUseCase } from './application/deliver-alert.use-case';
 import { GetAlertUseCase } from './application/get-alert.use-case';
 import { ListAlertsUseCase } from './application/list-alerts.use-case';
 import { ProcessAlertDeliveryUseCase } from './application/process-alert-delivery.use-case';
+import { ProcessTelegramDigestsUseCase } from './application/process-telegram-digests.use-case';
 import { AlertsController } from './http/alerts.controller';
 
 @Module({
   imports: [NotificationsModule, ObservabilityModule, SettingsModule],
   controllers: [AlertsController],
-  providers: [AlertsRepository, ListAlertsUseCase, GetAlertUseCase, DeliverAlertUseCase, ProcessAlertDeliveryUseCase],
-  exports: [AlertsRepository, GetAlertUseCase, DeliverAlertUseCase, ProcessAlertDeliveryUseCase],
+  providers: [AlertsRepository, ListAlertsUseCase, GetAlertUseCase, DeliverAlertUseCase, ProcessAlertDeliveryUseCase, ProcessTelegramDigestsUseCase],
+  exports: [AlertsRepository, GetAlertUseCase, DeliverAlertUseCase, ProcessAlertDeliveryUseCase, ProcessTelegramDigestsUseCase],
 })
 export class AlertsModule {}
