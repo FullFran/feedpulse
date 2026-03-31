@@ -34,8 +34,8 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
+      REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
       PORT: ${PORT:-3000}
     command: sh -c "node dist/scripts/migrate.js && node dist/main/api.js"
     depends_on:
@@ -62,8 +62,8 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
+      REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
     command: ['node', 'dist/main/scheduler.js']
     depends_on:
       postgres:
@@ -77,8 +77,8 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
+      REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
     command: ['node', 'dist/main/worker.js']
     depends_on:
       postgres:
