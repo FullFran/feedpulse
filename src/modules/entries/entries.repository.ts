@@ -28,6 +28,22 @@ interface EntryRow {
   fetched_at: Date;
 }
 
+interface EntryFilterRow {
+  id: string;
+  feed_id: number;
+  title: string | null;
+  content: string | null;
+  published_at: Date | null;
+}
+
+export interface EntryFilterCandidate {
+  id: string;
+  feedId: number;
+  title: string | null;
+  content: string | null;
+  publishedAt: string | null;
+}
+
 function mapEntry(row: EntryRow): Entry {
   return {
     id: row.id,
@@ -63,12 +79,21 @@ export class EntriesRepository {
     for (const entry of entries) {
       const result = await executor.query<EntryRow>(
         `
-          INSERT INTO entries (feed_id, title, link, guid, content, content_hash, published_at)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          INSERT INTO entries (feed_id, title, link, guid, content, content_hash, published_at, normalized_search_document)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, LOWER($8))
           ON CONFLICT DO NOTHING
           RETURNING id, feed_id, title, link, guid, content, content_hash, published_at, fetched_at
         `,
-        [feedId, entry.title, entry.link, entry.guid, entry.content, entry.contentHash, entry.publishedAt],
+        [
+          feedId,
+          entry.title,
+          entry.link,
+          entry.guid,
+          entry.content,
+          entry.contentHash,
+          entry.publishedAt,
+          `${entry.title ?? ''} ${entry.content ?? ''}`,
+        ],
       );
 
       if (result.rows[0]) {
@@ -107,5 +132,26 @@ export class EntriesRepository {
       items: itemsResult.rows.map(mapEntry),
       total: Number(totalResult.rows[0]?.count ?? '0'),
     };
+  }
+
+  async listForFilterSearch(limit: number): Promise<EntryFilterCandidate[]> {
+    const cappedLimit = Math.max(1, Math.min(limit, 5000));
+    const result = await this.databaseService.query<EntryFilterRow>(
+      `
+        SELECT id, feed_id, title, content, published_at
+        FROM entries
+        ORDER BY published_at DESC NULLS LAST, id DESC
+        LIMIT $1
+      `,
+      [cappedLimit],
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      feedId: row.feed_id,
+      title: row.title,
+      content: row.content,
+      publishedAt: row.published_at?.toISOString() ?? null,
+    }));
   }
 }

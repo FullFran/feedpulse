@@ -12,6 +12,6 @@ import { FeedsController } from './http/feeds.controller';
 @Module({
   controllers: [FeedsController],
   providers: [FeedsRepository, RegisterFeedUseCase, ListFeedsUseCase, GetFeedUseCase, UpdateFeedUseCase, DisableFeedUseCase, CheckFeedNowUseCase],
-  exports: [FeedsRepository],
+  exports: [FeedsRepository, RegisterFeedUseCase, ListFeedsUseCase],
 })
 export class FeedsModule {}

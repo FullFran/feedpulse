@@ -16,6 +16,14 @@ export interface AppConfiguration {
   rateLimitMaxBackoffMs: number;
   rateLimitBaseBackoffMs: number;
   workerMetricsPort: number;
+  opmlUploadMaxBytes: number;
+  opmlInitialJitterMaxSeconds: number;
+  agentInterfaceV1: boolean;
+  tuiEnabled: boolean;
+  enableAuth: boolean;
+  authProvider: string;
+  clerkSecretKey?: string;
+  clerkApiUrl: string;
 }
 
 export const configuration = (env: Env): AppConfiguration => ({
@@ -34,4 +42,12 @@ export const configuration = (env: Env): AppConfiguration => ({
   rateLimitMaxBackoffMs: env.RATE_LIMIT_MAX_BACKOFF_MS,
   rateLimitBaseBackoffMs: env.RATE_LIMIT_BASE_BACKOFF_MS,
   workerMetricsPort: env.WORKER_METRICS_PORT,
+  opmlUploadMaxBytes: env.OPML_UPLOAD_MAX_BYTES,
+  opmlInitialJitterMaxSeconds: env.OPML_INITIAL_JITTER_MAX_SECONDS,
+  agentInterfaceV1: env.AGENT_INTERFACE_V1,
+  tuiEnabled: env.TUI_ENABLED,
+  enableAuth: env.ENABLE_AUTH,
+  authProvider: env.AUTH_PROVIDER,
+  clerkSecretKey: env.CLERK_SECRET_KEY,
+  clerkApiUrl: env.CLERK_API_URL,
 });
