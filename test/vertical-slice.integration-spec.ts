@@ -100,7 +100,19 @@ class FakeRedis {
 }
 
 class FakeFeedFetcher {
+  private readonly queuedFailures: string[] = [];
+
+  queueFailure(message: string): void {
+    this.queuedFailures.push(message);
+  }
+
   async fetch(): Promise<FeedFetchResult> {
+    const nextFailure = this.queuedFailures.shift();
+
+    if (nextFailure) {
+      throw new Error(nextFailure);
+    }
+
     return {
       statusCode: 200,
       durationMs: 12,
@@ -274,11 +286,13 @@ describe('vertical slice integration', () => {
   let fakeOpmlParseQueue: FakeOpmlParseQueue;
   let fakeOpmlApplyQueue: FakeOpmlApplyQueue;
   let fakeAlertNotifier: FakeAlertNotifier;
+  let fakeFeedFetcher: FakeFeedFetcher;
+  let pool: { query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }> };
 
   beforeAll(async () => {
     const db = newDb({ autoCreateForeignKeyIndices: true });
     const adapter = db.adapters.createPg();
-    const pool = new adapter.Pool();
+    pool = new adapter.Pool();
     await bootstrapTestSchema(pool);
 
     fakeQueue = new FakeQueue();
@@ -286,6 +300,7 @@ describe('vertical slice integration', () => {
     fakeOpmlParseQueue = new FakeOpmlParseQueue();
     fakeOpmlApplyQueue = new FakeOpmlApplyQueue();
     fakeAlertNotifier = new FakeAlertNotifier();
+    fakeFeedFetcher = new FakeFeedFetcher();
 
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -311,7 +326,7 @@ describe('vertical slice integration', () => {
       .overrideProvider(OpmlApplyImportQueue)
       .useValue(fakeOpmlApplyQueue)
       .overrideProvider(FEED_FETCHER)
-      .useValue(new FakeFeedFetcher())
+      .useValue(fakeFeedFetcher)
       .overrideProvider(ALERT_NOTIFIER)
       .useValue(fakeAlertNotifier)
       .compile();
@@ -498,6 +513,103 @@ describe('vertical slice integration', () => {
       .expect((response) => {
         expect(response.body.data.status).toBe('paused');
       });
+  });
+
+  it('claims due auto-paused feeds but keeps manual paused feeds excluded', async () => {
+    const autoPausedFeedResponse = await request(app.getHttpServer())
+      .post('/api/v1/feeds')
+      .send({
+        url: 'https://example.com/auto-paused-due.xml',
+        poll_interval_seconds: 300,
+      })
+      .expect(201);
+
+    const manualPausedFeedResponse = await request(app.getHttpServer())
+      .post('/api/v1/feeds')
+      .send({
+        url: 'https://example.com/manual-paused-due.xml',
+        poll_interval_seconds: 300,
+      })
+      .expect(201);
+
+    const autoPausedFeedId = Number(autoPausedFeedResponse.body.data.id);
+    const manualPausedFeedId = Number(manualPausedFeedResponse.body.data.id);
+
+    await pool.query(
+      `
+        UPDATE feeds
+        SET status = 'paused',
+            last_error = 'auto-paused: dns resolution temporarily failed',
+            next_check_at = NOW() - INTERVAL '5 minutes'
+        WHERE id = $1
+      `,
+      [autoPausedFeedId],
+    );
+
+    await pool.query(
+      `
+        UPDATE feeds
+        SET status = 'paused',
+            last_error = 'paused manually by operator',
+            next_check_at = NOW() - INTERVAL '5 minutes'
+        WHERE id = $1
+      `,
+      [manualPausedFeedId],
+    );
+
+    const jobsBefore = fakeQueue.jobs.length;
+    await scheduleDueFeedsUseCase.execute();
+    const newJobs = fakeQueue.jobs.slice(jobsBefore);
+
+    expect(newJobs.some((job) => job.feedId === autoPausedFeedId)).toBe(true);
+    expect(newJobs.some((job) => job.feedId === manualPausedFeedId)).toBe(false);
+  });
+
+  it('marks repeated DNS failures as auto-paused with delayed retry', async () => {
+    const feedResponse = await request(app.getHttpServer())
+      .post('/api/v1/feeds')
+      .send({
+        url: 'https://example.com/dns-flaky.xml',
+        poll_interval_seconds: 300,
+      })
+      .expect(201);
+
+    const feedId = Number(feedResponse.body.data.id);
+
+    await pool.query(
+      `
+        UPDATE feeds
+        SET error_count = 2,
+            status = 'error'
+        WHERE id = $1
+      `,
+      [feedId],
+    );
+
+    fakeFeedFetcher.queueFailure('getaddrinfo ENOTFOUND rss.example.invalid');
+
+    await expect(processFeedJobUseCase.execute({ feedId })).resolves.toMatchObject({
+      insertedEntries: 0,
+      createdAlerts: 0,
+      statusCode: 0,
+    });
+
+    const feedRowResult = await pool.query(
+      'SELECT status, error_count, last_error, next_check_at FROM feeds WHERE id = $1',
+      [feedId],
+    );
+    const row = feedRowResult.rows[0] as {
+      status: string;
+      error_count: number;
+      last_error: string | null;
+      next_check_at: Date;
+    };
+
+    expect(row.status).toBe('paused');
+    expect(row.error_count).toBe(3);
+    expect(row.last_error).toContain('auto-paused:');
+    expect(row.last_error).toContain('ENOTFOUND');
+    expect(new Date(row.next_check_at).getTime()).toBeGreaterThan(Date.now() + 11 * 60 * 60 * 1000);
   });
 
   it('runs OPML happy path upload -> preview -> confirm -> status', async () => {

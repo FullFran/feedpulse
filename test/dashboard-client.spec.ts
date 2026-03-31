@@ -10,19 +10,63 @@ type MockResponse = {
   contentType?: string;
 };
 
+class FakeClassList {
+  private readonly classes = new Set<string>();
+
+  add(name: string) {
+    this.classes.add(name);
+  }
+
+  remove(name: string) {
+    this.classes.delete(name);
+  }
+
+  toggle(name: string, force?: boolean) {
+    if (force === true) {
+      this.classes.add(name);
+      return true;
+    }
+    if (force === false) {
+      this.classes.delete(name);
+      return false;
+    }
+    if (this.classes.has(name)) {
+      this.classes.delete(name);
+      return false;
+    }
+    this.classes.add(name);
+    return true;
+  }
+
+  contains(name: string) {
+    return this.classes.has(name);
+  }
+}
+
 class FakeElement {
   value = '';
   textContent = '';
   innerHTML = '';
+  hidden = false;
+  checked = false;
+  disabled = false;
+  files?: Array<{ name: string }>;
+  dataset: Record<string, string> = {};
+  classList = new FakeClassList();
   listeners = new Map<string, (event?: Record<string, unknown>) => void | Promise<void>>();
 
   addEventListener(type: string, handler: (event?: Record<string, unknown>) => void | Promise<void>) {
     this.listeners.set(type, handler);
   }
+
+  reset() {
+    this.value = '';
+    this.checked = false;
+  }
 }
 
 function createMockFetch(responses: MockResponse[]) {
-  return jest.fn(async () => {
+  return jest.fn(async (_url: string, _options?: Record<string, unknown>) => {
     const next = responses.shift();
     if (!next) {
       throw new Error('Unexpected fetch call');
@@ -48,6 +92,9 @@ function createHarness(responses: MockResponse[]) {
     'refresh',
     'auth-feedback',
     'summary',
+    'health-live',
+    'health-ready',
+    'overview-feedback',
     'entries-filter',
     'from',
     'to',
@@ -55,6 +102,69 @@ function createHarness(responses: MockResponse[]) {
     'page-size',
     'entries-meta',
     'entries-body',
+    'entries-prev',
+    'entries-next',
+    'entries-page',
+    'feed-create-form',
+    'feed-url',
+    'feed-poll-interval',
+    'feed-status',
+    'feeds-feedback',
+    'feeds-filter',
+    'feeds-filter-status',
+    'feeds-filter-q',
+    'feeds-page-size',
+    'feeds-meta',
+    'feeds-body',
+    'feeds-prev',
+    'feeds-next',
+    'feeds-page',
+    'rule-create-form',
+    'rule-name',
+    'rule-include',
+    'rule-exclude',
+    'rule-active',
+    'rules-feedback',
+    'rules-filter',
+    'rules-page-size',
+    'rules-meta',
+    'rules-body',
+    'rules-prev',
+    'rules-next',
+    'rules-page',
+    'alerts-filter',
+    'alerts-sent',
+    'alerts-page-size',
+    'alerts-feedback',
+    'alerts-meta',
+    'alerts-body',
+    'alerts-prev',
+    'alerts-next',
+    'alerts-page',
+    'opml-upload-form',
+    'opml-file',
+    'opml-feedback',
+    'opml-preview-form',
+    'opml-import-id',
+    'opml-preview-page-size',
+    'opml-preview-meta',
+    'opml-preview-body',
+    'opml-preview-prev',
+    'opml-preview-next',
+    'opml-preview-page',
+    'opml-confirm',
+    'opml-status-refresh',
+    'opml-status-output',
+    'tab-btn-overview',
+    'tab-btn-feeds',
+    'tab-btn-rules-alerts',
+    'tab-btn-entries',
+    'tab-btn-opml',
+    'tab-overview',
+    'tab-feeds',
+    'tab-rules-alerts',
+    'tab-entries',
+    'tab-opml',
   ] as const;
 
   const elements = new Map<string, FakeElement>(ids.map((id) => [id, new FakeElement()]));
@@ -75,6 +185,7 @@ function createHarness(responses: MockResponse[]) {
         return element;
       },
     },
+    FormData,
     Date,
     Promise,
     console,
@@ -87,18 +198,37 @@ function createHarness(responses: MockResponse[]) {
 }
 
 async function flush() {
-  await Promise.resolve();
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 10; i += 1) {
+    await Promise.resolve();
+  }
+}
+
+function fullRefreshResponses(): MockResponse[] {
+  return [
+    { body: { data: { feedsTotal: 10, feedsActive: 9, feedsError: 1, entries24h: 4, entries7d: 12, alertsPending: 2 } } },
+    { body: { status: 'ok' } },
+    { body: { status: 'ok' } },
+    { body: { data: [], meta: { total: 0, page: 1, has_next: false } } },
+    { body: { data: [], meta: { total: 0, page: 1, has_next: false } } },
+    { body: { data: [], meta: { total: 0, page: 1, has_next: false } } },
+    { body: { data: [], meta: { total: 0, page: 1, has_next: false } } },
+  ];
 }
 
 describe('dashboard client', () => {
-  it('shows summary and entries after saving API key', async () => {
-    const harness = createHarness([
-      { ok: false, status: 401, statusText: 'Unauthorized', body: { message: 'missing_api_key' } },
-      { body: { data: { feedsTotal: 10, feedsActive: 9, feedsError: 1, entries24h: 4, entries7d: 12, alertsPending: 2 } } },
-      { body: { data: [{ id: '1', title: 'hello', link: 'https://x', feedId: 1, publishedAt: '2026-03-31T00:00:00.000Z', fetchedAt: '2026-03-31T00:00:00.000Z' }], meta: { total: 1 } } },
-    ]);
+  it('prompts for API key before fetching', async () => {
+    const harness = createHarness([]);
+    const feedback = harness.elements.get('auth-feedback');
+    if (!feedback) throw new Error('missing element');
+
+    await flush();
+
+    expect(harness.fetch).toHaveBeenCalledTimes(0);
+    expect(feedback.textContent).toContain('Ingresa una API key');
+  });
+
+  it('saves API key and sends tenant auth headers', async () => {
+    const harness = createHarness(fullRefreshResponses());
 
     const apiKey = harness.elements.get('api-key');
     const saveKey = harness.elements.get('save-key');
@@ -113,19 +243,33 @@ describe('dashboard client', () => {
     await flush();
 
     expect(harness.storage.get('rss-dashboard-api-key')).toBe('ak_test');
-    expect(feedback.textContent).toBe('OK');
+    expect(harness.fetch).toHaveBeenCalledTimes(7);
+
+    const firstCall = harness.fetch.mock.calls[0];
+    const options = firstCall?.[1] as { headers: Record<string, string> };
+    expect(options.headers.Authorization).toBe('Bearer ak_test');
+    expect(options.headers['x-api-key']).toBe('ak_test');
+    expect(feedback.textContent).toContain('Datos actualizados');
   });
 
-  it('surfaces API error in feedback', async () => {
-    const harness = createHarness([
-      { ok: false, status: 401, statusText: 'Unauthorized', body: { message: 'missing_api_key' } },
-      { ok: false, status: 500, statusText: 'Internal Server Error', body: { message: 'boom' } },
-    ]);
+  it('creates a feed from dashboard form', async () => {
+    const responses = [
+      ...fullRefreshResponses(),
+      { body: { data: { id: 123, status: 'active' } } },
+      { body: { data: [{ id: 123, url: 'https://example.com/rss.xml', status: 'active', nextCheckAt: '2026-03-31T00:00:00.000Z' }], meta: { total: 1, page: 1, has_next: false } } },
+      { body: { data: { feedsTotal: 11, feedsActive: 10, feedsError: 1, entries24h: 4, entries7d: 12, alertsPending: 2 } } },
+      { body: { status: 'ok' } },
+      { body: { status: 'ok' } },
+    ];
 
+    const harness = createHarness(responses);
     const apiKey = harness.elements.get('api-key');
     const saveKey = harness.elements.get('save-key');
-    const feedback = harness.elements.get('auth-feedback');
-    if (!apiKey || !saveKey || !feedback) throw new Error('missing element');
+    const createForm = harness.elements.get('feed-create-form');
+    const feedUrl = harness.elements.get('feed-url');
+    const poll = harness.elements.get('feed-poll-interval');
+    const status = harness.elements.get('feed-status');
+    if (!apiKey || !saveKey || !createForm || !feedUrl || !poll || !status) throw new Error('missing element');
 
     await flush();
     apiKey.value = 'ak_test';
@@ -134,6 +278,26 @@ describe('dashboard client', () => {
     await click();
     await flush();
 
-    expect(feedback.textContent).toContain('Error: boom');
+    feedUrl.value = 'https://example.com/rss.xml';
+    poll.value = '600';
+    status.value = 'active';
+    const submit = createForm.listeners.get('submit');
+    if (!submit) throw new Error('submit listener missing');
+    await submit({ preventDefault: () => undefined });
+    await flush();
+
+    const postCall = harness.fetch.mock.calls.find(
+      (call) => call[0] === '/api/v1/feeds' && (call[1] as { method?: string })?.method === 'POST',
+    );
+    expect(postCall).toBeDefined();
+
+    const postOptions = postCall?.[1] as { body: string; headers: Record<string, string> };
+    expect(JSON.parse(postOptions.body)).toEqual({
+      url: 'https://example.com/rss.xml',
+      poll_interval_seconds: 600,
+      status: 'active',
+    });
+    expect(postOptions.headers.Authorization).toBe('Bearer ak_test');
+    expect(postOptions.headers['x-api-key']).toBe('ak_test');
   });
 });

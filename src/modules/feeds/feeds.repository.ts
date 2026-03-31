@@ -127,9 +127,16 @@ export class FeedsRepository {
       `
         SELECT *
         FROM feeds
-        WHERE status IN ('active', 'error')
-          AND next_check_at <= NOW()
-        ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+        WHERE next_check_at <= NOW()
+          AND (
+            status IN ('active', 'error')
+            OR (status = 'paused' AND last_error LIKE 'auto-paused:%')
+          )
+        ORDER BY CASE
+                   WHEN status = 'active' THEN 0
+                   WHEN status = 'error' THEN 1
+                   ELSE 2
+                 END,
                  next_check_at ASC
         LIMIT $1
       `,

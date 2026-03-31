@@ -14,6 +14,26 @@ import { FeedsRepository } from '../../feeds/feeds.repository';
 import { RulesRepository } from '../../rules/rules.repository';
 import { FEED_FETCHER, FeedFetcherPort } from '../domain/feed-fetcher.port';
 
+const AUTO_PAUSED_ERROR_PREFIX = 'auto-paused:';
+const DNS_AUTO_PAUSE_DELAY_SECONDS = 12 * 60 * 60;
+const BLOCKED_AUTO_PAUSE_DELAY_SECONDS = 14 * 60 * 60;
+
+type FeedFailureCategory =
+  | 'terminal_not_found'
+  | 'terminal_invalid_feed'
+  | 'terminal_invalid_xml'
+  | 'auto_paused_dns'
+  | 'auto_paused_blocked'
+  | 'transient';
+
+interface FeedFailureClassification {
+  category: FeedFailureCategory;
+  status: 'paused' | 'error';
+  nextCheckInSeconds: number;
+  lastError: string;
+  shouldRethrow: boolean;
+}
+
 function normalizeSearchText(value: string): string {
   return value
     .normalize('NFD')
@@ -141,19 +161,18 @@ export class ProcessFeedJobUseCase {
       const message = error instanceof Error ? error.message : 'Unknown fetch failure';
       this.metricsService.incrementFetchErrors();
       const nextErrorCount = feed.errorCount + 1;
-      const terminalFailure = this.isTerminalFeedFailure(message, nextErrorCount);
-      const backoffSeconds = this.computeErrorBackoffSeconds(feed.pollIntervalSeconds, nextErrorCount);
+      const classification = this.classifyFeedFailure(message, nextErrorCount, feed.pollIntervalSeconds);
       await this.recordFetchLog(feed.id, feed.tenantId, null, null, true, message);
       await this.feedsRepository.updateAfterFetch({
         feedId: feed.id,
-        status: terminalFailure ? 'paused' : 'error',
+        status: classification.status,
         errorCount: nextErrorCount,
-        lastError: message,
-        nextCheckAt: new Date(Date.now() + backoffSeconds * 1000).toISOString(),
+        lastError: classification.lastError,
+        nextCheckAt: new Date(Date.now() + classification.nextCheckInSeconds * 1000).toISOString(),
       });
 
-      if (terminalFailure) {
-        this.logger.warn(`Feed ${feed.id} auto-paused due to terminal failure: ${message}`);
+      if (!classification.shouldRethrow) {
+        this.logger.warn(`Feed ${feed.id} moved to ${classification.status} (${classification.category}): ${message}`);
         return { insertedEntries: 0, createdAlerts: 0, statusCode: 0 };
       }
 
@@ -169,15 +188,91 @@ export class ProcessFeedJobUseCase {
     return capped + jitter;
   }
 
-  private isTerminalFeedFailure(message: string, errorCount: number): boolean {
+  private computeAutoPauseBackoffSeconds(baseDelaySeconds: number): number {
+    const jitter = Math.floor(Math.random() * 30 * 60);
+    return baseDelaySeconds + jitter;
+  }
+
+  private classifyFeedFailure(message: string, errorCount: number, pollIntervalSeconds: number): FeedFailureClassification {
+    const category = this.detectFeedFailureCategory(message, errorCount);
+
+    if (category === 'auto_paused_dns') {
+      return {
+        category,
+        status: 'paused',
+        nextCheckInSeconds: this.computeAutoPauseBackoffSeconds(DNS_AUTO_PAUSE_DELAY_SECONDS),
+        lastError: `${AUTO_PAUSED_ERROR_PREFIX} ${message}`,
+        shouldRethrow: false,
+      };
+    }
+
+    if (category === 'auto_paused_blocked') {
+      return {
+        category,
+        status: 'paused',
+        nextCheckInSeconds: this.computeAutoPauseBackoffSeconds(BLOCKED_AUTO_PAUSE_DELAY_SECONDS),
+        lastError: `${AUTO_PAUSED_ERROR_PREFIX} ${message}`,
+        shouldRethrow: false,
+      };
+    }
+
+    if (category !== 'transient') {
+      return {
+        category,
+        status: 'paused',
+        nextCheckInSeconds: this.computeErrorBackoffSeconds(pollIntervalSeconds, errorCount),
+        lastError: message,
+        shouldRethrow: false,
+      };
+    }
+
+    return {
+      category,
+      status: 'error',
+      nextCheckInSeconds: this.computeErrorBackoffSeconds(pollIntervalSeconds, errorCount),
+      lastError: message,
+      shouldRethrow: true,
+    };
+  }
+
+  private detectFeedFailureCategory(message: string, errorCount: number): FeedFailureCategory {
     const normalized = message.toLowerCase();
     const http404 = normalized.includes('status 404');
     const http410 = normalized.includes('status 410');
     const unsupported = normalized.includes('feed not recognized as rss');
     const hardXml = normalized.includes('unable to parse xml') || normalized.includes('invalid character in') || normalized.includes('attribute without value');
     const repeatedlyForbidden = normalized.includes('status 403') && errorCount >= 5;
+    const dnsResolutionFailure = this.isDnsResolutionFailure(normalized) && errorCount >= 3;
 
-    return http404 || http410 || unsupported || hardXml || repeatedlyForbidden;
+    if (http404 || http410) {
+      return 'terminal_not_found';
+    }
+
+    if (unsupported) {
+      return 'terminal_invalid_feed';
+    }
+
+    if (hardXml) {
+      return 'terminal_invalid_xml';
+    }
+
+    if (repeatedlyForbidden) {
+      return 'auto_paused_blocked';
+    }
+
+    if (dnsResolutionFailure) {
+      return 'auto_paused_dns';
+    }
+
+    return 'transient';
+  }
+
+  private isDnsResolutionFailure(normalizedMessage: string): boolean {
+    return (
+      normalizedMessage.includes('could not resolve host') ||
+      normalizedMessage.includes('enotfound') ||
+      normalizedMessage.includes('eai_again')
+    );
   }
 
   private async deliverAlerts(alertIds: number[]): Promise<void> {

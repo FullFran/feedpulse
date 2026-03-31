@@ -10,7 +10,7 @@
     <main class="shell">
       <header>
         <h1>RSS Operations Dashboard</h1>
-        <p>Vista simple para métricas operativas y consulta de noticias por fecha + palabra clave.</p>
+        <p>Cliente operativo para gestionar feeds, reglas, alertas, búsquedas y OPML desde una sola vista.</p>
       </header>
 
       <section class="panel auth-panel">
@@ -26,44 +26,296 @@
         <p id="auth-feedback" class="feedback"></p>
       </section>
 
-      <section id="summary" class="kpis"></section>
+      <nav class="tabs" aria-label="Dashboard sections">
+        <button id="tab-btn-overview" class="tab-btn active" type="button">Overview</button>
+        <button id="tab-btn-feeds" class="tab-btn" type="button">Feeds</button>
+        <button id="tab-btn-rules-alerts" class="tab-btn" type="button">Rules / Alerts</button>
+        <button id="tab-btn-entries" class="tab-btn" type="button">Entries search</button>
+        <button id="tab-btn-opml" class="tab-btn" type="button">OPML</button>
+      </nav>
 
-      <section class="panel">
-        <h2>Filtrar noticias</h2>
-        <form id="entries-filter" class="filters">
-          <label>
-            Desde
-            <input id="from" name="from" type="datetime-local">
-          </label>
-          <label>
-            Hasta
-            <input id="to" name="to" type="datetime-local">
-          </label>
-          <label>
-            Palabras clave
-            <input id="search" name="search" type="text" placeholder="okupa sarep ...">
-          </label>
-          <label>
-            Tamaño página
-            <input id="page-size" name="page_size" type="number" value="50" min="1" max="200">
-          </label>
-          <button type="submit">Buscar</button>
-        </form>
-        <p id="entries-meta" class="feedback"></p>
+      <section id="tab-overview" class="tab-panel">
+        <section id="summary" class="kpis"></section>
+        <section class="panel">
+          <h2>Salud rápida</h2>
+          <div class="kpis health-kpis">
+            <article class="kpi">
+              <div class="label">Health</div>
+              <div id="health-live" class="value">-</div>
+            </article>
+            <article class="kpi">
+              <div class="label">Readiness</div>
+              <div id="health-ready" class="value">-</div>
+            </article>
+          </div>
+          <p id="overview-feedback" class="feedback"></p>
+        </section>
+      </section>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Título</th>
-                <th>Feed</th>
-                <th>Enlace</th>
-              </tr>
-            </thead>
-            <tbody id="entries-body"></tbody>
-          </table>
-        </div>
+      <section id="tab-feeds" class="tab-panel" hidden>
+        <section class="panel">
+          <h2>Crear feed</h2>
+          <form id="feed-create-form" class="filters form-compact">
+            <label>
+              URL
+              <input id="feed-url" type="url" placeholder="https://example.com/rss.xml" required>
+            </label>
+            <label>
+              Poll interval (s)
+              <input id="feed-poll-interval" type="number" value="1800" min="300" max="10800">
+            </label>
+            <label>
+              Estado inicial
+              <select id="feed-status">
+                <option value="active">active</option>
+                <option value="paused">paused</option>
+                <option value="error">error</option>
+              </select>
+            </label>
+            <button type="submit">Crear feed</button>
+          </form>
+          <p id="feeds-feedback" class="feedback"></p>
+        </section>
+
+        <section class="panel">
+          <h2>Feeds</h2>
+          <form id="feeds-filter" class="filters form-compact">
+            <label>
+              Estado
+              <select id="feeds-filter-status">
+                <option value="">todos</option>
+                <option value="active">active</option>
+                <option value="paused">paused</option>
+                <option value="error">error</option>
+              </select>
+            </label>
+            <label>
+              Buscar
+              <input id="feeds-filter-q" type="text" placeholder="example.com">
+            </label>
+            <label>
+              Tamaño página
+              <input id="feeds-page-size" type="number" value="25" min="1" max="200">
+            </label>
+            <button type="submit">Cargar feeds</button>
+          </form>
+          <p id="feeds-meta" class="feedback"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>URL</th>
+                  <th>Status</th>
+                  <th>Next check</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="feeds-body"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="feeds-prev" type="button">Anterior</button>
+            <span id="feeds-page">1</span>
+            <button id="feeds-next" type="button">Siguiente</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="tab-rules-alerts" class="tab-panel" hidden>
+        <section class="panel">
+          <h2>Crear regla</h2>
+          <form id="rule-create-form" class="filters form-compact">
+            <label>
+              Nombre
+              <input id="rule-name" type="text" maxlength="120" required>
+            </label>
+            <label>
+              Include keywords (coma)
+              <input id="rule-include" type="text" placeholder="ai, llm" required>
+            </label>
+            <label>
+              Exclude keywords (coma)
+              <input id="rule-exclude" type="text" placeholder="crypto">
+            </label>
+            <label>
+              <input id="rule-active" type="checkbox" checked>
+              Activa
+            </label>
+            <button type="submit">Crear regla</button>
+          </form>
+          <p id="rules-feedback" class="feedback"></p>
+        </section>
+
+        <section class="panel">
+          <h2>Reglas</h2>
+          <form id="rules-filter" class="filters form-compact">
+            <label>
+              Tamaño página
+              <input id="rules-page-size" type="number" value="25" min="1" max="200">
+            </label>
+            <button type="submit">Cargar reglas</button>
+          </form>
+          <p id="rules-meta" class="feedback"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Nombre</th>
+                  <th>Keywords</th>
+                  <th>Activa</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="rules-body"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="rules-prev" type="button">Anterior</button>
+            <span id="rules-page">1</span>
+            <button id="rules-next" type="button">Siguiente</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Alerts</h2>
+          <form id="alerts-filter" class="filters form-compact">
+            <label>
+              Estado
+              <select id="alerts-sent">
+                <option value="">todos</option>
+                <option value="false">pendientes</option>
+                <option value="true">enviadas</option>
+              </select>
+            </label>
+            <label>
+              Tamaño página
+              <input id="alerts-page-size" type="number" value="25" min="1" max="200">
+            </label>
+            <button type="submit">Cargar alerts</button>
+          </form>
+          <p class="feedback">El API no expone crear/eliminar alerts manualmente. Desde aquí puedes reenviar pendientes.</p>
+          <p id="alerts-feedback" class="feedback"></p>
+          <p id="alerts-meta" class="feedback"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Estado</th>
+                  <th>Rule</th>
+                  <th>Título entry</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="alerts-body"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="alerts-prev" type="button">Anterior</button>
+            <span id="alerts-page">1</span>
+            <button id="alerts-next" type="button">Siguiente</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="tab-entries" class="tab-panel" hidden>
+        <section class="panel">
+          <h2>Filtrar noticias</h2>
+          <form id="entries-filter" class="filters">
+            <label>
+              Desde
+              <input id="from" name="from" type="datetime-local">
+            </label>
+            <label>
+              Hasta
+              <input id="to" name="to" type="datetime-local">
+            </label>
+            <label>
+              Palabras clave
+              <input id="search" name="search" type="text" placeholder="okupa sarep ...">
+            </label>
+            <label>
+              Tamaño página
+              <input id="page-size" name="page_size" type="number" value="50" min="1" max="200">
+            </label>
+            <button type="submit">Buscar</button>
+          </form>
+          <p id="entries-meta" class="feedback"></p>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Título</th>
+                  <th>Feed</th>
+                  <th>Enlace</th>
+                </tr>
+              </thead>
+              <tbody id="entries-body"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="entries-prev" type="button">Anterior</button>
+            <span id="entries-page">1</span>
+            <button id="entries-next" type="button">Siguiente</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="tab-opml" class="tab-panel" hidden>
+        <section class="panel">
+          <h2>Importar OPML</h2>
+          <form id="opml-upload-form" class="filters form-compact">
+            <label>
+              Archivo OPML/XML
+              <input id="opml-file" type="file" accept=".opml,.xml,text/xml,application/xml,text/x-opml" required>
+            </label>
+            <button type="submit">Subir y parsear</button>
+          </form>
+          <p id="opml-feedback" class="feedback"></p>
+        </section>
+
+        <section class="panel">
+          <h2>Preview & confirm</h2>
+          <form id="opml-preview-form" class="filters form-compact">
+            <label>
+              Import ID
+              <input id="opml-import-id" type="number" min="1" placeholder="123">
+            </label>
+            <label>
+              Tamaño página
+              <input id="opml-preview-page-size" type="number" value="25" min="1" max="200">
+            </label>
+            <button id="opml-preview-refresh" type="submit">Ver preview</button>
+            <button id="opml-confirm" type="button">Confirmar import</button>
+            <button id="opml-status-refresh" type="button">Ver status</button>
+          </form>
+          <p id="opml-status-output" class="feedback"></p>
+          <p id="opml-preview-meta" class="feedback"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Title</th>
+                  <th>URL</th>
+                  <th>Status</th>
+                  <th>Validation</th>
+                </tr>
+              </thead>
+              <tbody id="opml-preview-body"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="opml-preview-prev" type="button">Anterior</button>
+            <span id="opml-preview-page">1</span>
+            <button id="opml-preview-next" type="button">Siguiente</button>
+          </div>
+      </section>
+
       </section>
     </main>
 

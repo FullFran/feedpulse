@@ -42,10 +42,11 @@ input, button {
   font: inherit;
 }
 
-input {
+input, select {
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   padding: 8px 10px;
+  background: #fff;
 }
 
 button {
@@ -57,7 +58,32 @@ button {
   cursor: pointer;
 }
 
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 a { color: #0369a1; text-decoration: none; }
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.tab-btn {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-color: #cbd5e1;
+}
+
+.tab-btn.active {
+  background: #0f172a;
+  color: #fff;
+}
+
+.tab-panel[hidden] { display: none; }
 
 .kpis {
   display: grid;
@@ -76,12 +102,27 @@ a { color: #0369a1; text-decoration: none; }
 .kpi .label { color: #64748b; font-size: 12px; text-transform: uppercase; }
 .kpi .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
 
+.health-kpis .value {
+  font-size: 18px;
+}
+
 .filters {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
   margin-bottom: 12px;
+}
+
+.form-compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .table-wrap { overflow: auto; }
@@ -101,6 +142,11 @@ th, td {
 
 .feedback { color: #475569; min-height: 1.2em; }
 
+.feedback[data-tone='error'] { color: #b91c1c; }
+.feedback[data-tone='success'] { color: #166534; }
+.feedback[data-tone='warn'] { color: #b45309; }
+
 @media (max-width: 900px) {
-  .filters { grid-template-columns: 1fr; }
+  .filters,
+  .form-compact { grid-template-columns: 1fr; }
 }
