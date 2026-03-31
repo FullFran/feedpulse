@@ -133,7 +133,7 @@ export class ProcessOpmlApplyJobUseCase {
       `
         INSERT INTO feeds (url, normalized_url_hash, poll_interval_seconds, status, next_check_at)
         VALUES ($1, $2, 1800, 'active', NOW() + ($3::text || ' seconds')::interval)
-        ON CONFLICT (normalized_url_hash) DO NOTHING
+        ON CONFLICT DO NOTHING
         RETURNING id, url
       `,
       [normalizedUrl, normalizedHash, jitterSeconds],
@@ -147,10 +147,11 @@ export class ProcessOpmlApplyJobUseCase {
       `
         SELECT id, url
         FROM feeds
-        WHERE normalized_url_hash = $1
+        WHERE normalized_url_hash = $1 OR url = $2
+        ORDER BY CASE WHEN normalized_url_hash = $1 THEN 0 ELSE 1 END
         LIMIT 1
       `,
-      [normalizedHash],
+      [normalizedHash, normalizedUrl],
     );
 
     const existing = existingResult.rows[0];
