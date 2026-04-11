@@ -21,7 +21,11 @@ export class UpdateRuleDto {
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional({ type: [String], example: ['milestone'] })
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['ocupación de una vivienda'],
+    description: 'Each item is matched as a full normalized phrase (accent-insensitive, contiguous text).',
+  })
   @Transform(({ value }) => normalizeKeywords(value))
   @IsOptional()
   @IsArray()
@@ -29,7 +33,11 @@ export class UpdateRuleDto {
   @ArrayMaxSize(20)
   include_keywords?: string[];
 
-  @ApiPropertyOptional({ type: [String], example: ['ignore'] })
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['ocupación de una promoción'],
+    description: 'Blocks alerts when a full normalized phrase is present.',
+  })
   @Transform(({ value }) => normalizeKeywords(value))
   @IsOptional()
   @IsArray()

@@ -28,7 +28,7 @@ export class RulesController {
   ) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create a keyword matching rule.' })
+  @ApiOperation({ summary: 'Create a phrase matching rule (normalized, contiguous containment).' })
   @ApiEnvelopeResponse(RuleModel, { status: 201, description: 'Rule created successfully.' })
   @ApiStandardErrorResponses()
   async create(@Req() request: Request, @Body() payload: CreateRuleDto) {
@@ -72,7 +72,7 @@ export class RulesController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update a keyword matching rule.' })
+  @ApiOperation({ summary: 'Update a phrase matching rule (normalized, contiguous containment).' })
   @ApiParam({ name: 'id', type: Number, example: 7 })
   @ApiEnvelopeResponse(RuleModel, { status: 200, description: 'Rule updated successfully.' })
   @ApiStandardErrorResponses()

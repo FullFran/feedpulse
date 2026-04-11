@@ -38,7 +38,19 @@ function normalizeSearchText(value: string): string {
   return value
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function containsNormalizedPhrase(haystack: string, phrase: string): boolean {
+  const normalizedPhrase = normalizeSearchText(phrase);
+
+  if (!normalizedPhrase) {
+    return false;
+  }
+
+  return haystack.includes(normalizedPhrase);
 }
 
 @Injectable()
@@ -122,8 +134,8 @@ export class ProcessFeedJobUseCase {
 
           return activeRules
             .filter((rule) => {
-              const includes = rule.includeKeywords.every((keyword) => haystack.includes(normalizeSearchText(keyword)));
-              const excludes = rule.excludeKeywords.some((keyword) => haystack.includes(normalizeSearchText(keyword)));
+              const includes = rule.includeKeywords.every((keyword) => containsNormalizedPhrase(haystack, keyword));
+              const excludes = rule.excludeKeywords.some((keyword) => containsNormalizedPhrase(haystack, keyword));
               return includes && !excludes;
             })
             .map((rule) => ({ entryId: entry.id, ruleId: rule.id }));

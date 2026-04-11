@@ -101,9 +101,14 @@ class FakeRedis {
 
 class FakeFeedFetcher {
   private readonly queuedFailures: string[] = [];
+  private readonly queuedBodies: string[] = [];
 
   queueFailure(message: string): void {
     this.queuedFailures.push(message);
+  }
+
+  queueBody(body: string): void {
+    this.queuedBodies.push(body);
   }
 
   async fetch(): Promise<FeedFetchResult> {
@@ -113,12 +118,16 @@ class FakeFeedFetcher {
       throw new Error(nextFailure);
     }
 
+    const nextBody = this.queuedBodies.shift();
+
     return {
       statusCode: 200,
       durationMs: 12,
       etag: 'etag-1',
       lastModified: 'Fri, 20 Mar 2026 10:00:00 GMT',
-      body: `<?xml version="1.0" encoding="UTF-8"?>
+      body:
+        nextBody ??
+        `<?xml version="1.0" encoding="UTF-8"?>
         <rss version="2.0">
           <channel>
             <title>Example Feed</title>
@@ -559,6 +568,105 @@ describe('vertical slice integration', () => {
       .expect((response) => {
         expect(response.body.data.status).toBe('paused');
       });
+  });
+
+  it('matches include/exclude as normalized full phrases (not disjoint words)', async () => {
+    const fullPhraseRule = await request(app.getHttpServer())
+      .post('/api/v1/rules')
+      .send({
+        name: 'Phrase full match',
+        include_keywords: ['ocupacion de una vivienda'],
+      })
+      .expect(201);
+
+    const accentRule = await request(app.getHttpServer())
+      .post('/api/v1/rules')
+      .send({
+        name: 'Phrase accent match',
+        include_keywords: ['ocupación de una vivienda'],
+      })
+      .expect(201);
+
+    const excludeRule = await request(app.getHttpServer())
+      .post('/api/v1/rules')
+      .send({
+        name: 'Phrase exclude block',
+        include_keywords: ['sareb'],
+        exclude_keywords: ['ocupacion de una promocion'],
+      })
+      .expect(201);
+
+    const feedResponse = await request(app.getHttpServer())
+      .post('/api/v1/feeds')
+      .send({
+        url: 'https://example.com/phrase-matching.xml',
+        poll_interval_seconds: 300,
+      })
+      .expect(201);
+
+    fakeFeedFetcher.queueBody(`<?xml version="1.0" encoding="UTF-8"?>
+      <rss version="2.0">
+        <channel>
+          <title>Phrase Feed</title>
+          <item>
+            <title>Caso confirmado de ocupacion de una vivienda</title>
+            <link>https://example.com/phrase/1</link>
+            <guid>phrase-1</guid>
+            <description>Coincidencia exacta esperada.</description>
+            <pubDate>Fri, 20 Mar 2026 09:01:00 GMT</pubDate>
+          </item>
+          <item>
+            <title>Resumen sobre ocupacion irregular de una vivienda</title>
+            <link>https://example.com/phrase/2</link>
+            <guid>phrase-2</guid>
+            <description>No debe coincidir por frase discontinua.</description>
+            <pubDate>Fri, 20 Mar 2026 09:02:00 GMT</pubDate>
+          </item>
+          <item>
+            <title>Sareb revisa ocupación de una promoción en curso</title>
+            <link>https://example.com/phrase/3</link>
+            <guid>phrase-3</guid>
+            <description>Debe bloquearse por exclude phrase.</description>
+            <pubDate>Fri, 20 Mar 2026 09:03:00 GMT</pubDate>
+          </item>
+          <item>
+            <title>Sareb anuncia nueva operación inmobiliaria</title>
+            <link>https://example.com/phrase/4</link>
+            <guid>phrase-4</guid>
+            <description>Debe coincidir para regla de sareb sin exclude.</description>
+            <pubDate>Fri, 20 Mar 2026 09:04:00 GMT</pubDate>
+          </item>
+        </channel>
+      </rss>`);
+
+    const processed = await processFeedJobUseCase.execute({ feedId: Number(feedResponse.body.data.id) });
+    expect(processed.insertedEntries).toBe(4);
+
+    const alertsResponse = await request(app.getHttpServer()).get('/api/v1/alerts').expect(200);
+    const phraseAlerts = alertsResponse.body.data.filter((alert: { rule: { name: string }; entry: { title: string | null } }) =>
+      ['Phrase full match', 'Phrase accent match', 'Phrase exclude block'].includes(alert.rule.name),
+    );
+
+    const fullPhraseTitles = phraseAlerts
+      .filter((alert: { rule: { name: string }; entry: { title: string | null } }) => alert.rule.name === 'Phrase full match')
+      .map((alert: { entry: { title: string | null } }) => alert.entry.title);
+    expect(fullPhraseTitles).toContain('Caso confirmado de ocupacion de una vivienda');
+    expect(fullPhraseTitles).not.toContain('Resumen sobre ocupacion irregular de una vivienda');
+
+    const accentTitles = phraseAlerts
+      .filter((alert: { rule: { name: string }; entry: { title: string | null } }) => alert.rule.name === 'Phrase accent match')
+      .map((alert: { entry: { title: string | null } }) => alert.entry.title);
+    expect(accentTitles).toContain('Caso confirmado de ocupacion de una vivienda');
+
+    const excludeTitles = phraseAlerts
+      .filter((alert: { rule: { name: string }; entry: { title: string | null } }) => alert.rule.name === 'Phrase exclude block')
+      .map((alert: { entry: { title: string | null } }) => alert.entry.title);
+    expect(excludeTitles).toContain('Sareb anuncia nueva operación inmobiliaria');
+    expect(excludeTitles).not.toContain('Sareb revisa ocupación de una promoción en curso');
+
+    expect(fullPhraseRule.body.data.id).toBeDefined();
+    expect(accentRule.body.data.id).toBeDefined();
+    expect(excludeRule.body.data.id).toBeDefined();
   });
 
   it('claims due auto-paused feeds but keeps manual paused feeds excluded', async () => {

@@ -16,14 +16,22 @@ export class CreateRuleDto {
   @MaxLength(120)
   name!: string;
 
-  @ApiProperty({ type: [String], example: ['AI', 'LLM'] })
+  @ApiProperty({
+    type: [String],
+    example: ['ocupación de una vivienda', 'sareb'],
+    description: 'Each item is matched as a full normalized phrase (accent-insensitive, contiguous text).',
+  })
   @Transform(({ value }) => normalizeKeywords(value))
   @IsArray()
   @ArrayNotEmpty({ message: 'rule_missing_include_keywords' })
   @ArrayMaxSize(20)
   include_keywords!: string[];
 
-  @ApiPropertyOptional({ type: [String], example: ['crypto'] })
+  @ApiPropertyOptional({
+    type: [String],
+    example: ['ocupación de una promoción'],
+    description: 'Blocks alerts when a full normalized phrase is present.',
+  })
   @Transform(({ value }) => normalizeKeywords(value))
   @IsOptional()
   @IsArray()
