@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { DatabaseService } from '../../infrastructure/persistence/database.service';
+import { canonicalizeArticleLink } from './domain/canonical-article-link';
 
 type QueryExecutor = Pick<DatabaseService, 'query'>;
 
@@ -135,16 +136,30 @@ export class AlertsRepository {
     const created: CreatedAlert[] = [];
 
     for (const match of matches) {
+      const entryResult = await executor.query<{ tenant_id: string; link: string | null }>(
+        `
+          SELECT tenant_id, link
+          FROM entries
+          WHERE id = $1::bigint
+        `,
+        [match.entryId],
+      );
+
+      const entry = entryResult.rows[0];
+      if (!entry) {
+        continue;
+      }
+
+      const canonicalLink = canonicalizeArticleLink(entry.link);
+
       const result = await executor.query<{ id: string }>(
         `
-          INSERT INTO alerts (tenant_id, entry_id, rule_id)
-          SELECT e.tenant_id, $1::bigint, $2::int
-          FROM entries e
-          WHERE e.id = $1::bigint
+          INSERT INTO alerts (tenant_id, entry_id, rule_id, canonical_link)
+          VALUES ($1::text, $2::bigint, $3::int, $4::text)
           ON CONFLICT DO NOTHING
           RETURNING id
         `,
-        [match.entryId, match.ruleId],
+        [entry.tenant_id, match.entryId, match.ruleId, canonicalLink],
       );
 
       if (result.rows[0]) {

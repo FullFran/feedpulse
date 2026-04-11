@@ -249,6 +249,7 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       tenant_id TEXT NOT NULL DEFAULT 'legacy',
       entry_id BIGINT NOT NULL REFERENCES entries(id),
       rule_id INT NOT NULL REFERENCES rules(id),
+      canonical_link TEXT,
       sent BOOLEAN NOT NULL DEFAULT FALSE,
       sent_at TIMESTAMPTZ,
       delivery_status TEXT NOT NULL DEFAULT 'pending',
@@ -259,6 +260,9 @@ async function bootstrapTestSchema(pool: { query: (sql: string) => Promise<unkno
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (entry_id, rule_id)
     )`,
+    `CREATE UNIQUE INDEX idx_alerts_tenant_rule_canonical_link_unique
+      ON alerts (tenant_id, rule_id, canonical_link)
+      WHERE canonical_link IS NOT NULL`,
     `CREATE TABLE telegram_digest_items (
       id BIGSERIAL PRIMARY KEY,
       tenant_id TEXT NOT NULL,
