@@ -35,6 +35,10 @@ async function bootstrapSchema(pool: Queryable): Promise<void> {
       entry_id BIGINT NOT NULL REFERENCES entries(id),
       rule_id INT NOT NULL REFERENCES rules(id),
       canonical_link TEXT,
+      matched_rules INTEGER[] NOT NULL DEFAULT '{}',
+      webhook_delivery_status TEXT NOT NULL DEFAULT 'pending',
+      telegram_delivery_status TEXT NOT NULL DEFAULT 'pending',
+      email_delivery_status TEXT NOT NULL DEFAULT 'pending',
       sent BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (entry_id, rule_id)

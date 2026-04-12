@@ -8,6 +8,7 @@ import { TelegramBotTokenResolverService } from '../../settings/telegram-bot-tok
 import { AppConfigService } from '../../../shared/config/app-config.service';
 
 import { AlertsRepository } from '../alerts.repository';
+import { AlertChannelDeliveryStatus } from '../alerts.repository';
 
 @Injectable()
 export class ProcessAlertDeliveryUseCase {
@@ -29,9 +30,12 @@ export class ProcessAlertDeliveryUseCase {
       throw new NotFoundException('alert_not_found');
     }
 
-    if (alert.sent) {
-      return;
-    }
+    // Get per-channel delivery status from the alert
+    const channelStatus: AlertChannelDeliveryStatus = {
+      webhook: alert.webhookDeliveryStatus,
+      telegram: alert.telegramDeliveryStatus,
+      email: alert.emailDeliveryStatus,
+    };
 
     const tenantSettings = await this.settingsRepository.getByTenantId(alert.tenantId);
     const notifierUrl = tenantSettings?.webhookNotifierUrl ?? this.appConfigService.webhookNotifierUrl ?? null;
@@ -39,13 +43,29 @@ export class ProcessAlertDeliveryUseCase {
     const telegramChatIds = tenantSettings?.telegramChatIds ?? [];
     const telegramDeliveryMode = tenantSettings?.telegramDeliveryMode ?? DEFAULT_TELEGRAM_DELIVERY_MODE;
     const telegramBotToken = this.telegramBotTokenResolverService.resolveForTenant({ tenantId: alert.tenantId, settings: tenantSettings });
-    const shouldSendWebhook = Boolean(notifierUrl);
-    const shouldSendEmail = recipientEmails.length > 0 && this.alertNotifier.isEmailEnabled();
-    const shouldSendTelegram = telegramChatIds.length > 0 && this.alertNotifier.isTelegramEnabled(telegramBotToken) && telegramDeliveryMode === 'instant';
-    const shouldQueueTelegramDigest =
-      telegramChatIds.length > 0 && this.alertNotifier.isTelegramEnabled(telegramBotToken) && telegramDeliveryMode === 'digest_10m';
 
-    if ((!shouldSendWebhook && !shouldSendEmail && !shouldSendTelegram && !shouldQueueTelegramDigest) || !this.alertNotifier.isEnabled()) {
+    // Determine which channels should be attempted (based on config AND current status)
+    // Webhook: only if URL is configured AND status is not already 'sent'
+    const shouldAttemptWebhook = Boolean(notifierUrl) && channelStatus.webhook !== 'sent';
+    // Email: only if configured AND not already sent
+    const shouldAttemptEmail = recipientEmails.length > 0 && this.alertNotifier.isEmailEnabled() && channelStatus.email !== 'sent';
+    // Telegram: only if configured AND not already sent
+    const shouldSendTelegram =
+      telegramChatIds.length > 0 &&
+      this.alertNotifier.isTelegramEnabled(telegramBotToken) &&
+      telegramDeliveryMode === 'instant' &&
+      channelStatus.telegram !== 'sent';
+    const shouldQueueTelegramDigest =
+      telegramChatIds.length > 0 &&
+      this.alertNotifier.isTelegramEnabled(telegramBotToken) &&
+      telegramDeliveryMode === 'digest_10m' &&
+      channelStatus.telegram !== 'sent';
+
+    // If no channels need delivery and notifier is disabled, mark as disabled
+    if (
+      (!shouldAttemptWebhook && !shouldAttemptEmail && !shouldSendTelegram && !shouldQueueTelegramDigest) ||
+      !this.alertNotifier.isEnabled()
+    ) {
       await this.alertsRepository.markDeliveryDisabled(input.alertId);
       return;
     }
@@ -53,35 +73,46 @@ export class ProcessAlertDeliveryUseCase {
     try {
       const channelErrors: string[] = [];
 
-      if (shouldSendWebhook && notifierUrl) {
+      // Attempt webhook delivery only if needed
+      if (shouldAttemptWebhook && notifierUrl) {
         try {
           await this.alertNotifier.sendWebhook(alert, notifierUrl);
+          await this.alertsRepository.markChannelDelivered(input.alertId, 'webhook');
         } catch (error) {
           const message = error instanceof Error ? error.message : 'unknown_webhook_failure';
           channelErrors.push(`webhook:${message}`);
         }
       }
 
-      if (shouldSendEmail) {
+      // Attempt email delivery only if needed
+      if (shouldAttemptEmail) {
         try {
           await this.alertNotifier.sendEmail(alert, recipientEmails);
+          await this.alertsRepository.markChannelDelivered(input.alertId, 'email');
         } catch (error) {
           const message = error instanceof Error ? error.message : 'unknown_email_failure';
           channelErrors.push(`email:${message}`);
         }
       }
 
+      // Attempt Telegram delivery only if needed
       if (shouldSendTelegram) {
+        let telegramSucceededForAll = true;
         for (const chatId of telegramChatIds) {
           try {
             await this.alertNotifier.sendTelegram(alert, chatId, telegramBotToken);
           } catch (error) {
             const message = error instanceof Error ? error.message : 'unknown_telegram_failure';
             channelErrors.push(`telegram:${chatId}:${message}`);
+            telegramSucceededForAll = false;
           }
+        }
+        if (telegramSucceededForAll) {
+          await this.alertsRepository.markChannelDelivered(input.alertId, 'telegram');
         }
       }
 
+      // Queue Telegram digest if needed
       if (shouldQueueTelegramDigest) {
         await this.alertsRepository.queueTelegramDigestItems({
           alertId: input.alertId,
@@ -90,14 +121,26 @@ export class ProcessAlertDeliveryUseCase {
         });
       }
 
+      // If any channel errors occurred, throw so the queue can retry failed channels
       if (channelErrors.length > 0) {
         throw new Error(`notification_channels_failed:${channelErrors.join('|')}`);
       }
 
-      const firstSuccessfulDelivery = await this.alertsRepository.markSent(input.alertId, input.attemptNumber);
+      // Check if ALL required channels have succeeded (only mark "sent" when done)
+      const finalStatus = await this.alertsRepository.checkAllChannelsDelivered(input.alertId, {
+        hasWebhook: Boolean(notifierUrl),
+        hasEmail: recipientEmails.length > 0,
+        hasTelegram: telegramChatIds.length > 0 && telegramDeliveryMode === 'instant',
+      });
 
-      if (firstSuccessfulDelivery) {
-        this.metricsService.incrementAlertsSent(1);
+      if (finalStatus.allDelivered) {
+        const firstSuccessfulDelivery = await this.alertsRepository.markSent(input.alertId, input.attemptNumber);
+        if (firstSuccessfulDelivery) {
+          this.metricsService.incrementAlertsSent(1);
+        }
+      } else if (input.willRetry) {
+        // Mark as retrying if there are still pending channels
+        await this.alertsRepository.markDeliveryRetryPending(input.alertId, input.attemptNumber);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown_delivery_failure';

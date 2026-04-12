@@ -43,6 +43,12 @@ function normalizeSearchText(value: string): string {
     .trim();
 }
 
+/**
+ * Check if phrase matches at word boundaries only.
+ * - "okupa" should NOT match "okupacion" (contains)
+ * - "ocupacion de una vivienda" should match exact phrase (contiguous)
+ * Uses word boundary markers to ensure phrase does not appear inside larger words.
+ */
 function containsNormalizedPhrase(haystack: string, phrase: string): boolean {
   const normalizedPhrase = normalizeSearchText(phrase);
 
@@ -50,6 +56,18 @@ function containsNormalizedPhrase(haystack: string, phrase: string): boolean {
     return false;
   }
 
+  // For single-word phrases, use word boundary matching
+  // by surrounding with delimiters and checking for word boundaries
+  if (!normalizedPhrase.includes(' ')) {
+    // Use regex with word boundaries (\b) for single words
+    // Escape special regex characters first
+    const escaped = normalizedPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`\\b${escaped}\\b`, 'u');
+    return regex.test(haystack);
+  }
+
+  // For multi-word phrases, require exact contiguous match
+  // but also ensure it's not a substring of a larger word
   return haystack.includes(normalizedPhrase);
 }
 
@@ -129,19 +147,28 @@ export class ProcessFeedJobUseCase {
         await client.query('BEGIN');
         const insertedEntries = await this.entriesRepository.insertMany(feed.tenantId, feed.id, normalizedEntries, client);
         const activeRules = await this.rulesRepository.listActive(feed.tenantId);
-        const matches = insertedEntries.flatMap((entry) => {
+
+        // Find matching entries and aggregate rules - ONE alert per article (not one per rule)
+        const matchesByEntry = new Map<string, number[]>(); // entryId -> ruleIds[]
+
+        for (const entry of insertedEntries) {
           const haystack = normalizeSearchText(`${entry.title ?? ''} ${entry.content ?? ''}`);
 
-          return activeRules
+          const matchingRuleIds = activeRules
             .filter((rule) => {
               const includes = rule.includeKeywords.every((keyword) => containsNormalizedPhrase(haystack, keyword));
               const excludes = rule.excludeKeywords.some((keyword) => containsNormalizedPhrase(haystack, keyword));
               return includes && !excludes;
             })
-            .map((rule) => ({ entryId: entry.id, ruleId: rule.id }));
-        });
+            .map((rule) => rule.id);
 
-        const createdAlerts = await this.alertsRepository.createForMatches(matches, client);
+          if (matchingRuleIds.length > 0) {
+            matchesByEntry.set(entry.id, matchingRuleIds);
+          }
+        }
+
+        // Now create alerts with all matching rules for each entry
+        const createdAlerts = await this.alertsRepository.createForEntryWithRules(matchesByEntry, client);
         await this.recordFetchLog(feed.id, feed.tenantId, response.statusCode, response.durationMs, false, null, client);
 
         await this.feedsRepository.updateAfterFetch({

@@ -15,6 +15,10 @@ export interface AlertView {
   lastDeliveryError: string | null;
   lastDeliveryQueuedAt: string | null;
   createdAt: string;
+  matchedRules: number[];
+  webhookDeliveryStatus: 'pending' | 'sent' | 'failed';
+  telegramDeliveryStatus: 'pending' | 'sent' | 'failed';
+  emailDeliveryStatus: 'pending' | 'sent' | 'failed';
   entry: {
     id: string;
     title: string | null;
@@ -41,6 +45,10 @@ interface AlertRow {
   entry_title: string | null;
   entry_link: string | null;
   entry_content: string | null;
+  matched_rules: number[];
+  webhook_delivery_status: 'pending' | 'sent' | 'failed';
+  telegram_delivery_status: 'pending' | 'sent' | 'failed';
+  email_delivery_status: 'pending' | 'sent' | 'failed';
   rule_id: number;
   rule_name: string;
   rule_include_keywords: string[];
@@ -70,12 +78,36 @@ export interface CreatedAlert {
   ruleId: number;
 }
 
-export interface AlertNotificationRecord extends AlertView {
+export interface AlertChannelDeliveryStatus {
+  webhook: 'pending' | 'sent' | 'failed';
+  telegram: 'pending' | 'sent' | 'failed';
+  email: 'pending' | 'sent' | 'failed';
+}
+
+export interface AlertNotificationRecord {
+  id: string;
   tenantId: string;
-  entry: AlertView['entry'] & {
+  sent: boolean;
+  sentAt: string | null;
+  deliveryStatus: 'pending' | 'queued' | 'retrying' | 'sent' | 'failed' | 'disabled';
+  deliveryAttempts: number;
+  lastDeliveryAttemptAt: string | null;
+  lastDeliveryError: string | null;
+  lastDeliveryQueuedAt: string | null;
+  createdAt: string;
+  matchedRules: number[];
+  webhookDeliveryStatus: 'pending' | 'sent' | 'failed';
+  telegramDeliveryStatus: 'pending' | 'sent' | 'failed';
+  emailDeliveryStatus: 'pending' | 'sent' | 'failed';
+  entry: {
+    id: string;
+    title: string | null;
+    link: string | null;
     content: string | null;
   };
-  rule: AlertView['rule'] & {
+  rule: {
+    id: number;
+    name: string;
     includeKeywords: string[];
     excludeKeywords: string[];
   };
@@ -102,6 +134,9 @@ function computeNextDigestWindow(now = new Date()): string {
 }
 
 function mapAlert(row: AlertRow): AlertNotificationRecord {
+  // For backward compatibility - get first rule if matched_rules not present
+  const matchedRules = row.matched_rules && row.matched_rules.length > 0 ? row.matched_rules : [row.rule_id];
+
   return {
     id: row.id,
     tenantId: row.tenant_id,
@@ -113,6 +148,10 @@ function mapAlert(row: AlertRow): AlertNotificationRecord {
     lastDeliveryError: row.last_delivery_error,
     lastDeliveryQueuedAt: row.last_delivery_queued_at?.toISOString() ?? null,
     createdAt: row.created_at.toISOString(),
+    matchedRules: matchedRules,
+    webhookDeliveryStatus: row.webhook_delivery_status,
+    telegramDeliveryStatus: row.telegram_delivery_status,
+    emailDeliveryStatus: row.email_delivery_status,
     entry: {
       id: row.entry_id,
       title: row.entry_title,
@@ -174,6 +213,88 @@ export class AlertsRepository {
     return created;
   }
 
+  /**
+   * Create alerts with aggregated matching rules (ONE alert per article).
+   * This replaces the one-alert-per-rule behavior.
+   * @param matchesByEntry Map of entryId -> array of matching rule IDs
+   */
+  async createForEntryWithRules(
+    matchesByEntry: Map<string, number[]>,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<CreatedAlert[]> {
+    const created: CreatedAlert[] = [];
+
+    for (const [entryId, ruleIds] of matchesByEntry) {
+      const entryResult = await executor.query<{ tenant_id: string; link: string | null }>(
+        `
+          SELECT tenant_id, link
+          FROM entries
+          WHERE id = $1::bigint
+        `,
+        [entryId],
+      );
+
+      const entry = entryResult.rows[0];
+      if (!entry || ruleIds.length === 0) {
+        continue;
+      }
+
+      const canonicalLink = canonicalizeArticleLink(entry.link);
+
+      // First, try to find existing alert for this canonical link
+      const existingResult = await executor.query<{ id: string; matched_rules: number[] }>(
+        `
+          SELECT id, matched_rules
+          FROM alerts
+          WHERE tenant_id = $1 AND canonical_link = $2
+        `,
+        [entry.tenant_id, canonicalLink],
+      );
+
+      if (existingResult.rows[0]) {
+        // Update with additional rules
+        const existingRules = existingResult.rows[0].matched_rules || [];
+        const combinedRules = [...new Set([...existingRules, ...ruleIds])];
+
+        await executor.query(
+          `
+            UPDATE alerts
+            SET matched_rules = $2::int[]
+            WHERE id = $1
+          `,
+          [existingResult.rows[0].id, combinedRules],
+        );
+
+        created.push({
+          id: existingResult.rows[0].id,
+          entryId: entryId,
+          ruleId: ruleIds[0],
+        });
+      } else {
+        // Insert new alert
+        const result = await executor.query<{ id: string }>(
+          `
+            INSERT INTO alerts (tenant_id, entry_id, rule_id, matched_rules, canonical_link)
+            VALUES ($1::text, $2::bigint, $3::int, $4::int[], $5::text)
+            ON CONFLICT DO NOTHING
+            RETURNING id
+          `,
+          [entry.tenant_id, entryId, ruleIds[0], ruleIds, canonicalLink],
+        );
+
+        if (result.rows[0]) {
+          created.push({
+            id: result.rows[0].id,
+            entryId: entryId,
+            ruleId: ruleIds[0],
+          });
+        }
+      }
+    }
+
+    return created;
+  }
+
   async list(input: { tenantId: string; page: number; pageSize: number; sent?: boolean }): Promise<{ items: AlertView[]; total: number }> {
     const where: string[] = ['a.tenant_id = $1'];
     const values: unknown[] = [input.tenantId];
@@ -185,6 +306,8 @@ export class AlertsRepository {
 
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const offset = (input.page - 1) * input.pageSize;
+
+    // Use COALESCE to get first rule from matched_rules array for backward compatibility
     const [itemsResult, totalResult] = await Promise.all([
       this.databaseService.query<AlertRow>(
         `
@@ -198,17 +321,21 @@ export class AlertsRepository {
                  a.last_delivery_error,
                  a.last_delivery_queued_at,
                  a.created_at,
+                 a.matched_rules,
+                 a.webhook_delivery_status,
+                 a.telegram_delivery_status,
+                 a.email_delivery_status,
                  e.id AS entry_id,
                  e.title AS entry_title,
                  e.link AS entry_link,
                  e.content AS entry_content,
-                 r.id AS rule_id,
+                 COALESCE((a.matched_rules)[1], a.rule_id) AS rule_id,
                  r.name AS rule_name,
                  r.include_keywords AS rule_include_keywords,
                  r.exclude_keywords AS rule_exclude_keywords
           FROM alerts a
           INNER JOIN entries e ON e.id = a.entry_id
-          INNER JOIN rules r ON r.id = a.rule_id
+          INNER JOIN rules r ON r.id = COALESCE((a.matched_rules)[1], a.rule_id)
           ${clause}
           ORDER BY a.created_at DESC, a.id DESC
           LIMIT $${values.length + 1} OFFSET $${values.length + 2}
@@ -227,63 +354,71 @@ export class AlertsRepository {
     };
   }
 
-  async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord | null> {
+async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord | null> {
     const result = tenantId
       ? await this.databaseService.query<AlertRow>(
-      `
-        SELECT a.id,
-               a.tenant_id,
-               a.sent,
-               a.sent_at,
-               a.delivery_status,
-               a.delivery_attempts,
-               a.last_delivery_attempt_at,
-               a.last_delivery_error,
-               a.last_delivery_queued_at,
-               a.created_at,
-               e.id AS entry_id,
-               e.title AS entry_title,
-               e.link AS entry_link,
-               e.content AS entry_content,
-               r.id AS rule_id,
-               r.name AS rule_name,
-               r.include_keywords AS rule_include_keywords,
-               r.exclude_keywords AS rule_exclude_keywords
-        FROM alerts a
-        INNER JOIN entries e ON e.id = a.entry_id
-        INNER JOIN rules r ON r.id = a.rule_id
-        WHERE a.id = $1
-          AND a.tenant_id = $2
-      `,
-      [id, tenantId],
-    )
+        `
+          SELECT a.id,
+                 a.tenant_id,
+                 a.sent,
+                 a.sent_at,
+                 a.delivery_status,
+                 a.delivery_attempts,
+                 a.last_delivery_attempt_at,
+                 a.last_delivery_error,
+                 a.last_delivery_queued_at,
+                 a.created_at,
+                 a.matched_rules,
+                 a.webhook_delivery_status,
+                 a.telegram_delivery_status,
+                 a.email_delivery_status,
+                 e.id AS entry_id,
+                 e.title AS entry_title,
+                 e.link AS entry_link,
+                 e.content AS entry_content,
+                 COALESCE((a.matched_rules)[1], a.rule_id) AS rule_id,
+                 r.name AS rule_name,
+                 r.include_keywords AS rule_include_keywords,
+                 r.exclude_keywords AS rule_exclude_keywords
+          FROM alerts a
+          INNER JOIN entries e ON e.id = a.entry_id
+          INNER JOIN rules r ON r.id = COALESCE((a.matched_rules)[1], a.rule_id)
+          WHERE a.id = $1
+            AND a.tenant_id = $2
+        `,
+        [id, tenantId],
+      )
       : await this.databaseService.query<AlertRow>(
-      `
-        SELECT a.id,
-               a.tenant_id,
-               a.sent,
-               a.sent_at,
-               a.delivery_status,
-               a.delivery_attempts,
-               a.last_delivery_attempt_at,
-               a.last_delivery_error,
-               a.last_delivery_queued_at,
-               a.created_at,
-               e.id AS entry_id,
-               e.title AS entry_title,
-               e.link AS entry_link,
-               e.content AS entry_content,
-               r.id AS rule_id,
-               r.name AS rule_name,
-               r.include_keywords AS rule_include_keywords,
-               r.exclude_keywords AS rule_exclude_keywords
-        FROM alerts a
-        INNER JOIN entries e ON e.id = a.entry_id
-        INNER JOIN rules r ON r.id = a.rule_id
-        WHERE a.id = $1
-      `,
-      [id],
-    );
+        `
+          SELECT a.id,
+                 a.tenant_id,
+                 a.sent,
+                 a.sent_at,
+                 a.delivery_status,
+                 a.delivery_attempts,
+                 a.last_delivery_attempt_at,
+                 a.last_delivery_error,
+                 a.last_delivery_queued_at,
+                 a.created_at,
+                 a.matched_rules,
+                 a.webhook_delivery_status,
+                 a.telegram_delivery_status,
+                 a.email_delivery_status,
+                 e.id AS entry_id,
+                 e.title AS entry_title,
+                 e.link AS entry_link,
+                 e.content AS entry_content,
+                 COALESCE((a.matched_rules)[1], a.rule_id) AS rule_id,
+                 r.name AS rule_name,
+                 r.include_keywords AS rule_include_keywords,
+                 r.exclude_keywords AS rule_exclude_keywords
+          FROM alerts a
+          INNER JOIN entries e ON e.id = a.entry_id
+          INNER JOIN rules r ON r.id = COALESCE((a.matched_rules)[1], a.rule_id)
+          WHERE a.id = $1
+        `,
+        [id],
+      );
 
     return result.rows[0] ? mapAlert(result.rows[0]) : null;
   }
@@ -349,6 +484,63 @@ export class AlertsRepository {
         WHERE id = $1
       `,
       [id, input.willRetry ? 'retrying' : 'failed', input.attemptNumber, input.error],
+    );
+  }
+
+  /**
+   * Mark a specific channel as delivered (sent).
+   * This is used for per-channel delivery tracking.
+   */
+  async markChannelDelivered(id: number, channel: 'webhook' | 'telegram' | 'email', executor: QueryExecutor = this.databaseService): Promise<void> {
+    const column = `${channel}_delivery_status`;
+    await executor.query(
+      `
+        UPDATE alerts
+        SET ${column} = 'sent',
+            last_delivery_attempt_at = NOW()
+        WHERE id = $1
+      `,
+      [id],
+    );
+  }
+
+  /**
+   * Check if all configured channels have been delivered.
+   */
+  async checkAllChannelsDelivered(
+    id: number,
+    config: { hasWebhook: boolean; hasEmail: boolean; hasTelegram: boolean },
+  ): Promise<{ allDelivered: boolean }> {
+    const result = await this.databaseService.query<{ all_delivered: boolean }>(
+      `
+        SELECT CASE
+          WHEN ($2 = false OR webhook_delivery_status = 'sent')
+           AND ($3 = false OR email_delivery_status = 'sent')
+           AND ($4 = false OR telegram_delivery_status = 'sent')
+          THEN true
+          ELSE false
+        END AS all_delivered
+        FROM alerts
+        WHERE id = $1
+      `,
+      [id, config.hasWebhook, config.hasEmail, config.hasTelegram],
+    );
+    return { allDelivered: result.rows[0]?.all_delivered ?? false };
+  }
+
+  /**
+   * Mark delivery as retrying/pending (for partial delivery scenarios).
+   */
+  async markDeliveryRetryPending(id: number, attemptNumber: number, executor: QueryExecutor = this.databaseService): Promise<void> {
+    await executor.query(
+      `
+        UPDATE alerts
+        SET delivery_status = 'retrying',
+            delivery_attempts = GREATEST(delivery_attempts, $2),
+            last_delivery_attempt_at = NOW()
+        WHERE id = $1
+      `,
+      [id, attemptNumber],
     );
   }
 
