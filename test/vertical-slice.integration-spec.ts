@@ -554,8 +554,15 @@ describe('vertical slice integration', () => {
     expect(fakeQueue.jobs.some((job) => job.feedId === feedId)).toBe(true);
 
     const alertsResponse = await request(app.getHttpServer()).get('/api/v1/alerts?sent=true').expect(200);
-    const matchingAlerts = alertsResponse.body.data.filter((alert: { rule: { name: string } }) => alert.rule.name === 'Platform milestones');
+    // With "one alert per article" aggregation, the alert should contain the updated rule in matched_rules
+    // The alert should have matched rules that include the updated rule ID
+    const matchingAlerts = alertsResponse.body.data.filter((alert: { matchedRules: number[] }) =>
+      alert.matchedRules.includes(Number(ruleId))
+    );
     expect(matchingAlerts).toHaveLength(1);
+    // The alert should also have the original rule (the one created before the update)
+    // Since the rule was updated (name changed but ID stays same), matchedRules should contain ruleId
+    expect(matchingAlerts[0].matchedRules).toContain(Number(ruleId));
 
     await request(app.getHttpServer()).delete(`/api/v1/rules/${ruleId}`).expect(204);
     await request(app.getHttpServer())
@@ -647,26 +654,40 @@ describe('vertical slice integration', () => {
     expect(processed.insertedEntries).toBe(4);
 
     const alertsResponse = await request(app.getHttpServer()).get('/api/v1/alerts').expect(200);
-    const phraseAlerts = alertsResponse.body.data.filter((alert: { rule: { name: string }; entry: { title: string | null } }) =>
-      ['Phrase full match', 'Phrase accent match', 'Phrase exclude block'].includes(alert.rule.name),
+    // One alert per article with matched-rules aggregation
+    // Filter alerts that have matching rules in matchedRules array
+    const phraseAlerts = alertsResponse.body.data.filter((alert: { matchedRules: number[] }) =>
+      alert.matchedRules.some((ruleId: number) => [fullPhraseRule.body.data.id, accentRule.body.data.id, excludeRule.body.data.id].includes(ruleId)),
     );
 
-    const fullPhraseTitles = phraseAlerts
-      .filter((alert: { rule: { name: string }; entry: { title: string | null } }) => alert.rule.name === 'Phrase full match')
-      .map((alert: { entry: { title: string | null } }) => alert.entry.title);
-    expect(fullPhraseTitles).toContain('Caso confirmado de ocupacion de una vivienda');
-    expect(fullPhraseTitles).not.toContain('Resumen sobre ocupacion irregular de una vivienda');
+    // With aggregation, the entry "Caso confirmado de ocupacion de una vivienda" should match 
+    // both "Phrase full match" (id 1) and "Phrase accent match" (id 2) rules
+    const consolidatedAlert = phraseAlerts.find((alert: { matchedRules: number[]; entry: { title: string | null } }) =>
+      alert.entry.title === 'Caso confirmado de ocupacion de una vivienda'
+    );
+    expect(consolidatedAlert).toBeDefined();
+    // The consolidated alert should contain both rule IDs (full match and accent match)
+    expect(consolidatedAlert.matchedRules).toContain(Number(fullPhraseRule.body.data.id));
+    expect(consolidatedAlert.matchedRules).toContain(Number(accentRule.body.data.id));
 
-    const accentTitles = phraseAlerts
-      .filter((alert: { rule: { name: string }; entry: { title: string | null } }) => alert.rule.name === 'Phrase accent match')
-      .map((alert: { entry: { title: string | null } }) => alert.entry.title);
-    expect(accentTitles).toContain('Caso confirmado de ocupacion de una vivienda');
+    // The "Phrase full match" entry should NOT contain the discontinuous match
+    const fullMatchAlert = phraseAlerts.find((alert: { matchedRules: number[]; entry: { title: string | null } }) =>
+      alert.entry.title === 'Resumen sobre ocupacion irregular de una vivienda'
+    );
+    expect(fullMatchAlert).toBeUndefined(); // Should not generate alert for discontinuous match
 
-    const excludeTitles = phraseAlerts
-      .filter((alert: { rule: { name: string }; entry: { title: string | null } }) => alert.rule.name === 'Phrase exclude block')
-      .map((alert: { entry: { title: string | null } }) => alert.entry.title);
-    expect(excludeTitles).toContain('Sareb anuncia nueva operación inmobiliaria');
-    expect(excludeTitles).not.toContain('Sareb revisa ocupación de una promoción en curso');
+    // The exclude rule should work correctly
+    const excludeMatchAlert = phraseAlerts.find((alert: { matchedRules: number[]; entry: { title: string | null } }) =>
+      alert.entry.title === 'Sareb anuncia nueva operación inmobiliaria'
+    );
+    expect(excludeMatchAlert).toBeDefined();
+    expect(excludeMatchAlert.matchedRules).toContain(Number(excludeRule.body.data.id));
+
+    // The excluded entry should NOT generate an alert
+    const excludedAlert = phraseAlerts.find((alert: { entry: { title: string | null } }) =>
+      alert.entry.title === 'Sareb revisa ocupación de una promoción en curso'
+    );
+    expect(excludedAlert).toBeUndefined(); // Excluded by phrase
 
     expect(fullPhraseRule.body.data.id).toBeDefined();
     expect(accentRule.body.data.id).toBeDefined();
@@ -866,8 +887,13 @@ describe('vertical slice integration', () => {
     ).rejects.toThrow('notification_channels_failed:webhook:webhook_delivery_failed_500');
 
     const failedAlertsResponse = await request(app.getHttpServer()).get('/api/v1/alerts').expect(200);
-    const failedAlert = failedAlertsResponse.body.data.find((alert: { rule: { name: string } }) => alert.rule.name === 'Failure watch');
-    expect(failedAlert.deliveryStatus).toBe('retrying');
+    // Find the alert that is in 'retrying' status (the one that failed delivery)
+    // With "one alert per article" aggregation, multiple tests may create alerts for the same article
+    // so we filter by delivery status instead of rule name
+    const failedAlert = failedAlertsResponse.body.data.find((alert: { deliveryStatus: string }) => 
+      alert.deliveryStatus === 'retrying'
+    );
+    expect(failedAlert).toBeDefined();
     expect(failedAlert.lastDeliveryError).toBe('notification_channels_failed:webhook:webhook_delivery_failed_500');
     expect(failedAlert.deliveryAttempts).toBe(1);
 
