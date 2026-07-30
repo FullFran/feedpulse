@@ -1,6 +1,5 @@
+import type { Request } from 'express';
 import { randomUUID } from 'node:crypto';
-
-import { Request } from 'express';
 
 export interface ApiMeta {
   timestamp: string;
