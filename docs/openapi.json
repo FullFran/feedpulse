@@ -1,0 +1,1604 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/v1/auth/dashboard-config": {
+      "get": {
+        "operationId": "AuthController_getDashboardConfig",
+        "parameters": [],
+        "responses": { "200": { "description": "" } },
+        "summary": "Return public dashboard auth config (Clerk publishable key, enabled mode).",
+        "tags": ["Dashboard"]
+      }
+    },
+    "/api/v1/feeds": {
+      "post": {
+        "operationId": "FeedsController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateFeedDto" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Feed created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/FeedModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Register a feed for monitoring.",
+        "tags": ["Feeds"]
+      },
+      "get": {
+        "operationId": "FeedsController_list",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "schema": { "example": "active", "type": "string", "enum": ["active", "paused", "error"] }
+          },
+          { "name": "q", "required": false, "in": "query", "schema": { "example": "example.com", "type": "string" } },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "default": 1, "type": "number" }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "maximum": 200, "default": 50, "type": "number" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Feed list returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/FeedModel" } },
+                    "meta": { "$ref": "#/components/schemas/PaginatedMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "List feeds with simple status and text filters.",
+        "tags": ["Feeds"]
+      }
+    },
+    "/api/v1/feeds/validate": {
+      "post": {
+        "description": "Fetches an arbitrary http(s) URL once, parses it as a feed and reports the title, item count and up to three recent items, so the caller sees what would be matched before committing. Transport and parse problems are reported in `error` using a closed vocabulary with a 200 response; upstream error text and response bodies are never echoed. Private, loopback and link-local targets are refused without issuing a request. Subject to the tighter write/probe rate limit.",
+        "operationId": "FeedsController_validate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ValidateFeedUrlDto" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Probe completed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/ValidateFeedUrlResultModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Check what a feed URL contains before registering it.",
+        "tags": ["Feeds"]
+      }
+    },
+    "/api/v1/feeds/{id}": {
+      "get": {
+        "operationId": "FeedsController_getById",
+        "parameters": [
+          { "name": "id", "required": true, "in": "path", "schema": { "example": 101, "type": "number" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Feed returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/FeedModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Get feed detail by id.",
+        "tags": ["Feeds"]
+      },
+      "patch": {
+        "operationId": "FeedsController_update",
+        "parameters": [
+          { "name": "id", "required": true, "in": "path", "schema": { "example": 101, "type": "number" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateFeedDto" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Feed updated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/FeedModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Update feed polling configuration or status.",
+        "tags": ["Feeds"]
+      },
+      "delete": {
+        "operationId": "FeedsController_remove",
+        "parameters": [
+          { "name": "id", "required": true, "in": "path", "schema": { "example": 101, "type": "number" } }
+        ],
+        "responses": {
+          "204": { "description": "Feed was disabled successfully." },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Safely disable a feed without deleting persisted history.",
+        "tags": ["Feeds"]
+      }
+    },
+    "/api/v1/feeds/{id}/check-now": {
+      "post": {
+        "description": "Returns `queued` when a new job was accepted and `already_queued` when a fetch for this feed is already in flight.",
+        "operationId": "FeedsController_checkNow",
+        "parameters": [
+          { "name": "id", "required": true, "in": "path", "schema": { "example": 101, "type": "number" } }
+        ],
+        "responses": {
+          "202": {
+            "description": "Feed check request was accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/FeedCheckNowResultModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Queue an immediate feed check without waiting for the scheduler tick.",
+        "tags": ["Feeds"]
+      }
+    },
+    "/api/v1/rules": {
+      "post": {
+        "operationId": "RulesController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateRuleDto" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Rule created successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/RuleModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Create a phrase matching rule (normalized, contiguous containment).",
+        "tags": ["Rules"]
+      },
+      "get": {
+        "operationId": "RulesController_list",
+        "parameters": [
+          { "name": "is_active", "required": false, "in": "query", "schema": { "example": true, "type": "boolean" } },
+          { "name": "q", "required": false, "in": "query", "schema": { "example": "AI", "type": "string" } },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "default": 1, "type": "number" }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "maximum": 200, "default": 50, "type": "number" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rule list returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/RuleModel" } },
+                    "meta": { "$ref": "#/components/schemas/PaginatedMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "List rules with active-state and text filters.",
+        "tags": ["Rules"]
+      }
+    },
+    "/api/v1/rules/batch": {
+      "post": {
+        "description": "Pairs with OPML bulk import: after importing dozens of feeds, the matching rule set can be sent in one request. The response accounts for every submitted name exactly once, as created, skipped (already existed) or duplicate (listed twice in this request).",
+        "operationId": "RulesController_batchCreate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BatchCreateRulesDto" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Batch processed. Inspect the body to see which rules were created and which were skipped.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/BatchCreateRulesResultModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Create up to 50 rules in one call. Create-only: existing names are skipped, never overwritten.",
+        "tags": ["Rules"]
+      }
+    },
+    "/api/v1/rules/{id}": {
+      "get": {
+        "operationId": "RulesController_getById",
+        "parameters": [{ "name": "id", "required": true, "in": "path", "schema": { "example": 7, "type": "number" } }],
+        "responses": {
+          "200": {
+            "description": "Rule returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/RuleModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Get rule detail by id.",
+        "tags": ["Rules"]
+      },
+      "patch": {
+        "operationId": "RulesController_update",
+        "parameters": [{ "name": "id", "required": true, "in": "path", "schema": { "example": 7, "type": "number" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateRuleDto" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Rule updated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/RuleModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Update a phrase matching rule (normalized, contiguous containment).",
+        "tags": ["Rules"]
+      },
+      "delete": {
+        "operationId": "RulesController_remove",
+        "parameters": [{ "name": "id", "required": true, "in": "path", "schema": { "example": 7, "type": "number" } }],
+        "responses": {
+          "204": { "description": "Rule was disabled successfully." },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Safely disable a rule without deleting alert history.",
+        "tags": ["Rules"]
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "operationId": "SettingsController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Settings returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/TenantSettingsModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Read current tenant settings for dashboard integrations.",
+        "tags": ["Settings"]
+      },
+      "put": {
+        "operationId": "SettingsController_update",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UpdateSettingsDto" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings updated successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/TenantSettingsModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Update current tenant settings (webhook URL, etc.).",
+        "tags": ["Settings"]
+      }
+    },
+    "/api/v1/entries": {
+      "get": {
+        "operationId": "EntriesController_list",
+        "parameters": [
+          { "name": "feed_id", "required": false, "in": "query", "schema": { "example": 101, "type": "number" } },
+          {
+            "name": "search",
+            "required": false,
+            "in": "query",
+            "schema": { "maxLength": 200, "example": "milestone", "type": "string" }
+          },
+          {
+            "name": "from",
+            "required": false,
+            "in": "query",
+            "description": "Filter entries with published_at or fetched_at >= from.",
+            "schema": { "example": "2026-03-01T00:00:00.000Z", "type": "string" }
+          },
+          {
+            "name": "to",
+            "required": false,
+            "in": "query",
+            "description": "Filter entries with published_at or fetched_at <= to.",
+            "schema": { "example": "2026-03-31T23:59:59.999Z", "type": "string" }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "default": 1, "type": "number" }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "maximum": 200, "default": 50, "type": "number" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entry list returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/EntryModel" } },
+                    "meta": { "$ref": "#/components/schemas/PaginatedMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "List ingested feed entries with feed and text filters.",
+        "tags": ["Entries"]
+      }
+    },
+    "/api/v1/alerts": {
+      "get": {
+        "operationId": "AlertsController_list",
+        "parameters": [
+          { "name": "sent", "required": false, "in": "query", "schema": { "example": true, "type": "boolean" } },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "default": 1, "type": "number" }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "maximum": 200, "default": 50, "type": "number" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Alert list returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/AlertModel" } },
+                    "meta": { "$ref": "#/components/schemas/PaginatedMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "List persisted alerts with optional sent-state filter.",
+        "tags": ["Alerts"]
+      }
+    },
+    "/api/v1/alerts/{id}": {
+      "get": {
+        "operationId": "AlertsController_getById",
+        "parameters": [{ "name": "id", "required": true, "in": "path", "schema": { "example": 55, "type": "number" } }],
+        "responses": {
+          "200": {
+            "description": "Alert returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/AlertModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Get alert detail by id.",
+        "tags": ["Alerts"]
+      }
+    },
+    "/api/v1/alerts/{id}/send": {
+      "post": {
+        "operationId": "AlertsController_send",
+        "parameters": [{ "name": "id", "required": true, "in": "path", "schema": { "example": 55, "type": "number" } }],
+        "responses": {
+          "202": {
+            "description": "Alert delivery was queued successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "$ref": "#/components/schemas/AlertDeliveryResultModel" },
+                    "meta": { "$ref": "#/components/schemas/ApiMetaModel" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Queue an alert for delivery through the configured notifier.",
+        "tags": ["Alerts"]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "HealthController_health",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Liveness returned successfully.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponseModel" } } }
+          }
+        },
+        "summary": "Return a lightweight liveness check for the API runtime.",
+        "tags": ["Observability"]
+      }
+    },
+    "/ready": {
+      "get": {
+        "operationId": "HealthController_readiness",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "All readiness checks passed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ReadinessResponseModel" } } }
+          },
+          "503": {
+            "description": "One or more readiness checks failed.",
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ReadinessFailureResponseModel" } }
+            }
+          }
+        },
+        "summary": "Return readiness across PostgreSQL, Redis, and schema state.",
+        "tags": ["Observability"]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Requires an `Authorization: Bearer <METRICS_AUTH_TOKEN>` header when `METRICS_AUTH_TOKEN` is configured. Left open when the variable is unset so that local development and private-network scrapers keep working.",
+        "operationId": "HealthController_metrics",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Prometheus metrics payload (aggregated from API and worker processes).",
+            "content": {
+              "text/plain; version=0.0.4; charset=utf-8": {
+                "schema": {
+                  "type": "string",
+                  "example": "# HELP rss_entries_ingested_total Total ingested entries\n# TYPE rss_entries_ingested_total counter"
+                }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid metrics bearer token." }
+        },
+        "summary": "Expose Prometheus metrics for operational monitoring.",
+        "tags": ["Observability"]
+      }
+    },
+    "/api/v1/ops/summary": {
+      "get": {
+        "operationId": "HealthController_opsSummary",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Operational summary returned successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "feedsTotal": { "type": "number", "example": 12455 },
+                        "feedsActive": { "type": "number", "example": 12000 },
+                        "feedsError": { "type": "number", "example": 455 },
+                        "entries24h": { "type": "number", "example": 923 },
+                        "entries7d": { "type": "number", "example": 5432 },
+                        "alertsPending": { "type": "number", "example": 18 }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Return tenant-scoped operational counters for the dashboard.",
+        "tags": ["Observability"]
+      }
+    },
+    "/api/v1/opml/imports": {
+      "post": {
+        "operationId": "OpmlImportsController_upload",
+        "parameters": [],
+        "responses": {
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Upload OPML file and create asynchronous parse-preview job.",
+        "tags": ["OPML Imports"]
+      }
+    },
+    "/api/v1/opml/imports/{id}/preview": {
+      "get": {
+        "operationId": "OpmlImportsController_preview",
+        "parameters": [
+          { "name": "id", "required": true, "in": "path", "schema": { "example": 1, "type": "number" } },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "default": 1, "type": "number" }
+          },
+          {
+            "name": "page_size",
+            "required": false,
+            "in": "query",
+            "schema": { "minimum": 1, "maximum": 200, "default": 50, "type": "number" }
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Get OPML preview with counters and paginated items.",
+        "tags": ["OPML Imports"]
+      }
+    },
+    "/api/v1/opml/imports/{id}/confirm": {
+      "post": {
+        "operationId": "OpmlImportsController_confirm",
+        "parameters": [{ "name": "id", "required": true, "in": "path", "schema": { "example": 1, "type": "number" } }],
+        "responses": {
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Confirm OPML import (idempotent) and enqueue apply job.",
+        "tags": ["OPML Imports"]
+      }
+    },
+    "/api/v1/opml/imports/{id}/status": {
+      "get": {
+        "operationId": "OpmlImportsController_status",
+        "parameters": [{ "name": "id", "required": true, "in": "path", "schema": { "example": 1, "type": "number" } }],
+        "responses": {
+          "400": {
+            "description": "Invalid request payload or query parameters.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "401": {
+            "description": "Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "404": {
+            "description": "Requested resource was not found.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "409": {
+            "description": "Request conflicts with existing state.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          },
+          "503": {
+            "description": "Dependency readiness checks failed.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelopeModel" } } }
+          }
+        },
+        "summary": "Get import status and progress with partial-failure visibility.",
+        "tags": ["OPML Imports"]
+      }
+    }
+  },
+  "info": {
+    "title": "FeedPulse API",
+    "description": "HTTP API for registering RSS/Atom feeds and keyword rules, inspecting the entries and alerts they produce, and reading operational health.",
+    "version": "0.1.0",
+    "contact": {}
+  },
+  "tags": [
+    { "name": "Feeds", "description": "Feed registration and lifecycle management." },
+    { "name": "Rules", "description": "Keyword rule management." },
+    { "name": "Entries", "description": "Persisted entry inspection APIs." },
+    { "name": "Alerts", "description": "Alert inspection and manual delivery APIs." },
+    { "name": "Settings", "description": "Tenant-scoped runtime settings and integrations." },
+    { "name": "Dashboard", "description": "Operator dashboard mounted from the API origin." },
+    { "name": "Observability", "description": "Health, readiness, and metrics endpoints." }
+  ],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "ApiKey": { "type": "apiKey", "in": "header", "name": "x-api-key" },
+      "Bearer": { "scheme": "bearer", "bearerFormat": "JWT", "type": "http" }
+    },
+    "schemas": {
+      "ErrorEnvelopeModel": {
+        "type": "object",
+        "properties": {
+          "statusCode": { "type": "number", "example": 404 },
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable error code, lower snake_case.",
+            "example": "feed_not_found"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error description.",
+            "example": "feed_not_found"
+          },
+          "timestamp": { "type": "string", "example": "2026-03-21T12:00:00.000Z" },
+          "path": {
+            "type": "string",
+            "description": "Request path that produced the error.",
+            "example": "/api/v1/feeds/101"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "Correlation id, echoed back in the `x-request-id` response header.",
+            "example": "a7b3d7f0-5f78-4cba-8f4d-cf2c92ad2f76"
+          }
+        },
+        "required": ["statusCode", "code", "message", "timestamp", "path", "requestId"]
+      },
+      "FeedModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "number", "example": 101 },
+          "url": { "type": "string", "example": "https://example.com/rss.xml" },
+          "status": { "type": "string", "enum": ["active", "paused", "error"], "example": "active" },
+          "etag": { "type": "string", "nullable": true, "example": "etag-1" },
+          "lastModified": { "type": "string", "nullable": true, "example": "Fri, 20 Mar 2026 10:00:00 GMT" },
+          "lastCheckedAt": { "type": "string", "nullable": true, "example": "2026-03-21T12:00:00.000Z" },
+          "nextCheckAt": { "type": "string", "example": "2026-03-21T12:05:00.000Z" },
+          "pollIntervalSeconds": { "type": "number", "example": 1800 },
+          "errorCount": { "type": "number", "example": 0 },
+          "lastError": { "type": "string", "nullable": true, "example": null },
+          "avgResponseMs": { "type": "number", "nullable": true, "example": 245 },
+          "avgItemsPerDay": { "type": "number", "nullable": true, "example": 12.4 },
+          "createdAt": { "type": "string", "example": "2026-03-21T11:00:00.000Z" },
+          "updatedAt": { "type": "string", "example": "2026-03-21T11:00:00.000Z" }
+        },
+        "required": [
+          "id",
+          "url",
+          "status",
+          "nextCheckAt",
+          "pollIntervalSeconds",
+          "errorCount",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ApiMetaModel": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": "string", "example": "2026-03-21T12:00:00.000Z" },
+          "request_id": { "type": "string", "example": "a7b3d7f0-5f78-4cba-8f4d-cf2c92ad2f76" }
+        },
+        "required": ["timestamp", "request_id"]
+      },
+      "PaginatedMetaModel": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": "string", "example": "2026-03-21T12:00:00.000Z" },
+          "request_id": { "type": "string", "example": "a7b3d7f0-5f78-4cba-8f4d-cf2c92ad2f76" },
+          "page": { "type": "number", "example": 1 },
+          "page_size": { "type": "number", "example": 50 },
+          "total": { "type": "number", "example": 125 },
+          "has_next": { "type": "boolean", "example": true }
+        },
+        "required": ["timestamp", "request_id", "page", "page_size", "total", "has_next"]
+      },
+      "CreateFeedDto": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string", "example": "https://example.com/rss.xml" },
+          "poll_interval_seconds": { "type": "number", "minimum": 300, "maximum": 10800, "example": 1800 },
+          "status": { "type": "string", "enum": ["active", "paused", "error"], "example": "active" }
+        },
+        "required": ["url"]
+      },
+      "ValidateFeedUrlSampleItemModel": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "nullable": true, "example": "Council approves the new housing plan" },
+          "link": { "type": "string", "nullable": true, "example": "https://example.com/articles/housing-plan" },
+          "publishedAt": { "type": "string", "nullable": true, "example": "2026-07-29T09:12:00.000Z" }
+        },
+        "required": ["title", "link", "publishedAt"]
+      },
+      "ValidateFeedUrlResultModel": {
+        "type": "object",
+        "properties": {
+          "reachable": {
+            "type": "boolean",
+            "example": true,
+            "description": "True when the origin answered with a status below 400 after following redirects."
+          },
+          "statusCode": { "type": "number", "nullable": true, "example": 200 },
+          "latencyMs": {
+            "type": "number",
+            "example": 184,
+            "description": "Round-trip time of the probe in milliseconds."
+          },
+          "feedTitle": { "type": "string", "nullable": true, "example": "Example City Newsroom" },
+          "itemCount": {
+            "type": "number",
+            "nullable": true,
+            "example": 42,
+            "description": "Items found in the parsed feed."
+          },
+          "latestItemPublishedAt": { "type": "string", "nullable": true, "example": "2026-07-29T09:12:00.000Z" },
+          "sampleItems": {
+            "description": "Up to three of the most recent items, so the caller sees what would be matched.",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ValidateFeedUrlSampleItemModel" }
+          },
+          "error": {
+            "type": "string",
+            "nullable": true,
+            "example": null,
+            "description": "Closed error vocabulary. `null` means the URL was fetched and parsed as a feed. Upstream error text is never echoed.",
+            "enum": [
+              "dns_failure",
+              "connection_refused",
+              "tls_error",
+              "timeout",
+              "unsafe_protocol",
+              "unsafe_host",
+              "too_many_redirects",
+              "invalid_redirect",
+              "response_too_large",
+              "parse_error",
+              "http_4xx / http_5xx",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "reachable",
+          "statusCode",
+          "latencyMs",
+          "feedTitle",
+          "itemCount",
+          "latestItemPublishedAt",
+          "sampleItems",
+          "error"
+        ]
+      },
+      "ValidateFeedUrlDto": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string",
+            "example": "https://example.com/rss.xml",
+            "maxLength": 2048,
+            "description": "Absolute http(s) URL to probe. It does not have to be registered as a feed."
+          }
+        },
+        "required": ["url"]
+      },
+      "UpdateFeedDto": {
+        "type": "object",
+        "properties": {
+          "poll_interval_seconds": { "type": "number", "minimum": 300, "maximum": 10800, "example": 600 },
+          "status": { "type": "string", "enum": ["active", "paused", "error"], "example": "paused" }
+        }
+      },
+      "FeedCheckNowResultModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "number", "example": 101 },
+          "status": {
+            "type": "string",
+            "enum": ["queued", "already_queued"],
+            "example": "queued",
+            "description": "`already_queued` means the feed currently holds a scheduler claim, i.e. a fetch is already in flight."
+          }
+        },
+        "required": ["id", "status"]
+      },
+      "RuleModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "number", "example": 7 },
+          "name": { "type": "string", "example": "AI updates" },
+          "includeKeywords": { "example": ["AI", "LLM"], "type": "array", "items": { "type": "string" } },
+          "excludeKeywords": { "example": ["crypto"], "type": "array", "items": { "type": "string" } },
+          "isActive": { "type": "boolean", "example": true },
+          "createdAt": { "type": "string", "example": "2026-03-21T11:00:00.000Z" },
+          "updatedAt": { "type": "string", "example": "2026-03-21T11:00:00.000Z" }
+        },
+        "required": ["id", "name", "includeKeywords", "excludeKeywords", "isActive", "createdAt", "updatedAt"]
+      },
+      "CreateRuleDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "example": "Grid outages", "maxLength": 120 },
+          "include_keywords": {
+            "example": ["power outage", "São Paulo"],
+            "description": "Each item is matched as a full normalized phrase (accent-insensitive, contiguous text). Max 20 items, 200 characters each.",
+            "maxItems": 20,
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "exclude_keywords": {
+            "example": ["scheduled maintenance"],
+            "description": "Blocks alerts when a full normalized phrase is present. Max 20 items, 200 characters each.",
+            "maxItems": 20,
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "is_active": { "type": "boolean", "example": true, "default": true }
+        },
+        "required": ["name", "include_keywords"]
+      },
+      "BatchCreateRulesResultModel": {
+        "type": "object",
+        "properties": {
+          "created": {
+            "description": "Rules that were newly created by this request.",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/RuleModel" }
+          },
+          "skippedNames": {
+            "example": ["AI updates"],
+            "description": "Names left untouched because the tenant already had a rule with that name.",
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "duplicateNames": {
+            "example": ["Evictions"],
+            "description": "Names the request listed more than once. Only the first occurrence was used.",
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": ["created", "skippedNames", "duplicateNames"]
+      },
+      "BatchCreateRulesDto": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "Rules to create. Create-only: a name the tenant already uses is reported back untouched, never overwritten.",
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CreateRuleDto" }
+          }
+        },
+        "required": ["rules"]
+      },
+      "UpdateRuleDto": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "example": "Platform milestones", "maxLength": 120 },
+          "include_keywords": {
+            "example": ["power outage", "São Paulo"],
+            "description": "Each item is matched as a full normalized phrase (accent-insensitive, contiguous text). Max 20 items, 200 characters each.",
+            "maxItems": 20,
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "exclude_keywords": {
+            "example": ["scheduled maintenance"],
+            "description": "Blocks alerts when a full normalized phrase is present. Max 20 items, 200 characters each.",
+            "maxItems": 20,
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "is_active": { "type": "boolean", "example": false }
+        }
+      },
+      "TenantSettingsModel": {
+        "type": "object",
+        "properties": {
+          "webhookNotifierUrl": {
+            "type": "string",
+            "nullable": true,
+            "example": "https://hooks.example.com/rss-alerts"
+          },
+          "recipientEmails": {
+            "example": ["alerts@example.com", "ops@example.com"],
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "telegramChatIds": {
+            "example": ["-1001234567890", "987654321"],
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "telegramDeliveryMode": { "type": "string", "enum": ["instant", "digest_10m"], "example": "instant" },
+          "telegramBotTokenConfigured": { "type": "boolean", "example": true }
+        },
+        "required": ["recipientEmails", "telegramChatIds", "telegramDeliveryMode", "telegramBotTokenConfigured"]
+      },
+      "UpdateSettingsDto": { "type": "object", "properties": {} },
+      "EntryModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "42" },
+          "feedId": { "type": "number", "example": 101 },
+          "title": { "type": "string", "nullable": true, "example": "AI launch update" },
+          "link": { "type": "string", "nullable": true, "example": "https://example.com/items/1" },
+          "guid": { "type": "string", "nullable": true, "example": "item-1" },
+          "content": { "type": "string", "nullable": true, "example": "LLM systems reached a new milestone." },
+          "contentHash": { "type": "string", "example": "d41d8cd98f00b204e9800998ecf8427e" },
+          "publishedAt": { "type": "string", "nullable": true, "example": "2026-03-21T10:55:00.000Z" },
+          "fetchedAt": { "type": "string", "example": "2026-03-21T11:00:00.000Z" }
+        },
+        "required": ["id", "feedId", "contentHash", "fetchedAt"]
+      },
+      "AlertEntryModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "42" },
+          "title": { "type": "string", "nullable": true, "example": "AI launch update" },
+          "link": { "type": "string", "nullable": true, "example": "https://example.com/items/1" },
+          "content": { "type": "string", "nullable": true, "example": "LLM systems reached a new milestone." }
+        },
+        "required": ["id"]
+      },
+      "AlertRuleModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "number", "example": 7 },
+          "name": { "type": "string", "example": "AI updates" },
+          "includeKeywords": { "example": ["AI", "LLM"], "type": "array", "items": { "type": "string" } },
+          "excludeKeywords": { "example": ["crypto"], "type": "array", "items": { "type": "string" } }
+        },
+        "required": ["id", "name", "includeKeywords", "excludeKeywords"]
+      },
+      "AlertModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "55" },
+          "sent": { "type": "boolean", "example": true },
+          "sentAt": { "type": "string", "nullable": true, "example": "2026-03-21T11:01:00.000Z" },
+          "deliveryStatus": {
+            "type": "string",
+            "enum": ["pending", "queued", "retrying", "sent", "failed", "disabled"],
+            "example": "retrying"
+          },
+          "deliveryAttempts": { "type": "number", "example": 2 },
+          "lastDeliveryAttemptAt": { "type": "string", "nullable": true, "example": "2026-03-21T11:01:00.000Z" },
+          "lastDeliveryError": { "type": "string", "nullable": true, "example": "webhook_delivery_failed_500" },
+          "lastDeliveryQueuedAt": { "type": "string", "nullable": true, "example": "2026-03-21T11:00:45.000Z" },
+          "createdAt": { "type": "string", "example": "2026-03-21T11:00:30.000Z" },
+          "entry": { "$ref": "#/components/schemas/AlertEntryModel" },
+          "rule": { "$ref": "#/components/schemas/AlertRuleModel" }
+        },
+        "required": ["id", "sent", "deliveryStatus", "deliveryAttempts", "createdAt", "entry", "rule"]
+      },
+      "AlertDeliveryResultModel": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "example": "55" },
+          "status": { "type": "string", "enum": ["queued", "already_sent", "disabled"], "example": "queued" }
+        },
+        "required": ["id", "status"]
+      },
+      "HealthCheckStatusModel": {
+        "type": "object",
+        "properties": { "api": { "type": "string", "example": "ok" } },
+        "required": ["api"]
+      },
+      "HealthResponseModel": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "ok" },
+          "checks": { "$ref": "#/components/schemas/HealthCheckStatusModel" },
+          "timestamp": { "type": "string", "example": "2026-03-21T11:00:00.000Z" }
+        },
+        "required": ["status", "checks", "timestamp"]
+      },
+      "ReadinessChecksModel": {
+        "type": "object",
+        "properties": {
+          "postgres": { "type": "string", "example": "ok" },
+          "redis": { "type": "string", "example": "ok" },
+          "schema": { "type": "string", "example": "ok" }
+        },
+        "required": ["postgres", "redis", "schema"]
+      },
+      "ReadinessResponseModel": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "ok" },
+          "checks": { "$ref": "#/components/schemas/ReadinessChecksModel" },
+          "timestamp": { "type": "string", "example": "2026-03-21T11:00:00.000Z" }
+        },
+        "required": ["status", "checks", "timestamp"]
+      },
+      "ReadinessFailureResponseModel": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string", "example": "error" },
+          "checks": { "$ref": "#/components/schemas/ReadinessChecksModel" },
+          "timestamp": { "type": "string", "example": "2026-03-21T11:00:00.000Z" }
+        },
+        "required": ["status", "checks", "timestamp"]
+      }
+    }
+  }
+}

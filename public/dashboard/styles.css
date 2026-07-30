@@ -1,177 +1,624 @@
-* { box-sizing: border-box; }
+/*
+ * FeedPulse operator dashboard.
+ *
+ * Dependency-free stylesheet: no build step, no framework, no external fonts
+ * (the helmet CSP served by src/main/create-api-app.ts allows 'self' and inline
+ * styles only, so a remote font or icon set would be blocked).
+ *
+ * All colours go through custom properties declared twice: once for the light
+ * palette and once inside `prefers-color-scheme: dark`. Nothing below hard-codes
+ * a colour, so the page follows the reader's OS theme without any JavaScript.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f3f5f9;
+  --surface: #ffffff;
+  --surface-subtle: #f8fafc;
+  --surface-hover: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+
+  --text: #0f172a;
+  --text-muted: #51607a;
+  --text-faint: #64748b;
+
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-text: #ffffff;
+  --link: #0b5ea8;
+
+  --focus: #2563eb;
+
+  --tone-info: #475569;
+  --tone-success: #15803d;
+  --tone-success-bg: #ecfdf5;
+  --tone-warn: #b45309;
+  --tone-warn-bg: #fffbeb;
+  --tone-error: #b91c1c;
+  --tone-error-bg: #fef2f2;
+  --tone-neutral-bg: #f1f5f9;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 4%);
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1120;
+    --surface: #111a2e;
+    --surface-subtle: #0f1729;
+    --surface-hover: #17223a;
+    --border: #23304b;
+    --border-strong: #33415f;
+
+    --text: #e6edf8;
+    --text-muted: #a3b1c9;
+    --text-faint: #8593ad;
+
+    --accent: #3b82f6;
+    --accent-hover: #60a5fa;
+    --accent-text: #06122a;
+    --link: #7dd3fc;
+
+    --focus: #7dd3fc;
+
+    --tone-info: #a3b1c9;
+    --tone-success: #6ee7b7;
+    --tone-success-bg: #06281d;
+    --tone-warn: #fbbf24;
+    --tone-warn-bg: #2b1f05;
+    --tone-error: #fca5a5;
+    --tone-error-bg: #2c0f11;
+    --tone-neutral-bg: #1a2440;
+
+    --shadow-card: none;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0;
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: #f6f8fb;
-  color: #0f172a;
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
 }
 
 .shell {
-  max-width: 1100px;
+  max-width: 1180px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 28px 20px 64px;
 }
 
-header h1 { margin-bottom: 8px; }
-header p { margin-top: 0; color: #475569; }
+/* --- Header --------------------------------------------------------------- */
+
+.masthead {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.masthead-mark {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  margin-top: 2px;
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: 1.65rem;
+  letter-spacing: -0.02em;
+}
+
+.masthead .tagline {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  max-width: 72ch;
+}
+
+/* --- Panels --------------------------------------------------------------- */
 
 .panel {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 14px;
-  margin-bottom: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+  padding: 18px;
+  margin-bottom: 18px;
 }
 
-.auth-panel .row {
+.panel > h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.panel > h2 + .panel-hint {
+  margin-top: 4px;
+}
+
+.panel-hint {
+  margin: 0 0 14px;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  max-width: 82ch;
+}
+
+.panel-hint code,
+.tagline code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: var(--tone-neutral-bg);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+/* --- Auth toolbar --------------------------------------------------------- */
+
+.auth-panel .auth-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) 1fr;
+  gap: 12px 16px;
+  align-items: end;
+}
+
+/* Horizontal group of related controls. */
+.row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
-  margin-top: 10px;
 }
+
+.row a {
+  padding: 8px 4px;
+}
+
+/* --- Forms ---------------------------------------------------------------- */
 
 label {
   display: grid;
   gap: 6px;
-  color: #334155;
-  font-size: 14px;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 500;
 }
 
-input, button {
+input,
+select,
+textarea,
+button {
   font: inherit;
+  color: var(--text);
 }
 
-input, select {
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
+input,
+select,
+textarea {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
-  background: #fff;
+  background: var(--surface);
+  min-width: 0;
+}
+
+textarea {
+  resize: vertical;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-faint);
 }
 
 button {
-  border: 1px solid #94a3b8;
-  border-radius: 8px;
-  padding: 8px 12px;
-  background: #0f172a;
-  color: white;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
   cursor: pointer;
 }
 
+button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
 button:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-a { color: #0369a1; text-decoration: none; }
+/*
+ * Secondary actions: everything that is not the primary submit of its panel.
+ * Declared by selector rather than by class so the JavaScript-rendered table
+ * buttons pick it up without extra markup.
+ */
+.btn-secondary,
+td button {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border-strong);
+  font-weight: 500;
+}
+
+.btn-secondary:hover:not(:disabled),
+td button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+td button {
+  padding: 4px 9px;
+  font-size: 0.8125rem;
+  margin-right: 4px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* --- Tabs ----------------------------------------------------------------- */
 
 .tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
+  gap: 6px;
+  margin-bottom: 18px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
 }
 
 .tab-btn {
-  background: #e2e8f0;
-  color: #0f172a;
-  border-color: #cbd5e1;
+  background: transparent;
+  color: var(--text-muted);
+  border-color: transparent;
+  font-weight: 500;
 }
 
-.tab-btn.active {
-  background: #0f172a;
-  color: #fff;
+.tab-btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
-.tab-panel[hidden] { display: none; }
+.tab-btn.active,
+.tab-btn.active:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.tab-panel[hidden] {
+  display: none;
+}
+
+/* --- KPIs ----------------------------------------------------------------- */
 
 .kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 10px;
-  margin-bottom: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
 }
 
 .kpi {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-card);
+  padding: 13px 14px;
 }
 
-.kpi .label { color: #64748b; font-size: 12px; text-transform: uppercase; }
-.kpi .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+.kpi .label {
+  color: var(--text-faint);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.kpi .value {
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Collapses the summary grid before the first load instead of leaving a gap. */
+.kpis:empty {
+  display: none;
+}
+
+.health-kpis {
+  margin-bottom: 12px;
+  /* Two short status words: cap the track so they do not stretch edge to edge. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 220px));
+}
 
 .health-kpis .value {
-  font-size: 18px;
+  font-size: 1.15rem;
 }
+
+/* --- Filter forms --------------------------------------------------------- */
 
 .filters {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  gap: 12px;
   align-items: end;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
-.form-compact {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+/*
+ * Grid children stretch by default, which turned every submit into a button as
+ * wide as a whole filter column. Size them to their label instead.
+ */
+.filters > button {
+  align-self: end;
+  justify-self: start;
 }
 
-.pager {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-}
+/* --- Tables --------------------------------------------------------------- */
 
-.table-wrap { overflow: auto; }
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
 
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
-th, td {
+thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-subtle);
+  color: var(--text-faint);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+th,
+td {
   text-align: left;
-  border-bottom: 1px solid #e2e8f0;
-  padding: 8px;
-  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+  padding: 9px 12px;
+  vertical-align: middle;
 }
 
-.feedback { color: #475569; min-height: 1.2em; }
+tbody tr:last-child th,
+tbody tr:last-child td {
+  border-bottom: 0;
+}
 
-.feedback[data-tone='error'] { color: #b91c1c; }
-.feedback[data-tone='success'] { color: #166534; }
-.feedback[data-tone='warn'] { color: #b45309; }
+tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+td.numeric {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.cell-truncate {
+  display: inline-block;
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+/* --- Status badges -------------------------------------------------------- */
+
+.badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--tone-neutral-bg);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.badge[data-status='active'],
+.badge[data-status='sent'],
+.badge[data-status='yes'] {
+  background: var(--tone-success-bg);
+  color: var(--tone-success);
+}
+
+.badge[data-status='paused'],
+.badge[data-status='pending'],
+.badge[data-status='queued'],
+.badge[data-status='retrying'] {
+  background: var(--tone-warn-bg);
+  color: var(--tone-warn);
+}
+
+.badge[data-status='error'],
+.badge[data-status='failed'] {
+  background: var(--tone-error-bg);
+  color: var(--tone-error);
+}
+
+/* --- Empty states --------------------------------------------------------- */
+
+/*
+ * Rendered inside a full-width `td` by app.js (and seeded statically in
+ * index.html) so a fresh install never shows a blank rectangle.
+ */
+.empty-row td {
+  padding: 0;
+}
+
+.empty-row:hover td {
+  background: transparent;
+}
+
+.empty-state {
+  padding: 30px 18px;
+  text-align: center;
+}
+
+.empty-state .empty-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.empty-state .empty-hint {
+  margin: 5px auto 0;
+  max-width: 62ch;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* --- Pager ---------------------------------------------------------------- */
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.pager button {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border-strong);
+  font-weight: 500;
+}
+
+.pager button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+/* --- Feedback / status lines ---------------------------------------------- */
+
+.feedback {
+  color: var(--tone-info);
+  font-size: 0.875rem;
+  min-height: 1.35em;
+  margin: 10px 0 0;
+}
+
+.feedback[data-tone='error'] {
+  color: var(--tone-error);
+  font-weight: 500;
+}
+
+.feedback[data-tone='success'] {
+  color: var(--tone-success);
+}
+
+.feedback[data-tone='warn'] {
+  color: var(--tone-warn);
+}
+
+/*
+ * Banner variant: used where the message is the panel's primary status line and
+ * an inline colour change alone is too easy to miss.
+ */
+.banner {
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  padding: 9px 12px;
+  margin: 0 0 14px;
+}
+
+.banner[data-tone='success'] {
+  background: var(--tone-success-bg);
+  border-left-color: var(--tone-success);
+}
+
+.banner[data-tone='error'] {
+  background: var(--tone-error-bg);
+  border-left-color: var(--tone-error);
+}
+
+.banner[data-tone='warn'] {
+  background: var(--tone-warn-bg);
+  border-left-color: var(--tone-warn);
+}
+
+/* --- Settings ------------------------------------------------------------- */
 
 .settings-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
+  /* Cards hold very different amounts of content; without this the one-field
+     Webhook card is stretched to the height of the Telegram card. */
+  align-items: start;
 }
 
 .settings-card {
-  border: 1px solid #dbeafe;
-  border-radius: 10px;
-  padding: 12px;
-  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  background: var(--surface-subtle);
+  display: grid;
+  gap: 10px;
+  align-content: start;
 }
 
 .settings-card h3 {
-  margin: 0 0 6px 0;
+  margin: 0;
+  font-size: 0.95rem;
 }
 
 .settings-help {
-  margin: 0 0 10px 0;
-  color: #475569;
-  font-size: 13px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
 }
 
 .settings-token-state {
-  margin-bottom: 10px;
-  font-size: 13px;
+  margin: 0;
+  font-size: 0.8125rem;
 }
 
 .checkbox-inline {
@@ -180,12 +627,8 @@ th, td {
   gap: 8px;
 }
 
-textarea {
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 8px 10px;
-  resize: vertical;
-  font: inherit;
+.checkbox-inline input {
+  width: auto;
 }
 
 .settings-actions {
@@ -195,19 +638,23 @@ textarea {
   flex-wrap: wrap;
 }
 
-.settings-banner {
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin-bottom: 12px;
-}
-
-.settings-banner[data-tone='success'] { background: #ecfdf5; }
-.settings-banner[data-tone='error'] { background: #fef2f2; }
-.settings-banner[data-tone='warn'] { background: #fffbeb; }
+/* --- Responsive ----------------------------------------------------------- */
 
 @media (max-width: 900px) {
   .filters,
-  .form-compact,
-  .settings-form { grid-template-columns: 1fr; }
+  .settings-form,
+  .auth-panel .auth-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .cell-truncate {
+    max-width: 24ch;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
 }
