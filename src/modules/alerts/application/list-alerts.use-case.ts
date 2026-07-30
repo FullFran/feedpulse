@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-
 import { AlertsRepository } from '../alerts.repository';
 
 @Injectable()

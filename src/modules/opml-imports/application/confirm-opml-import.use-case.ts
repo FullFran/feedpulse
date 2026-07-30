@@ -1,10 +1,5 @@
 import { ConflictException, Inject, Injectable } from '@nestjs/common';
-
-import {
-  OPML_APPLY_IMPORT_QUEUE_TOKEN,
-  OpmlApplyImportQueuePort,
-} from '../../../infrastructure/queue/queue.constants';
-
+import { OPML_APPLY_IMPORT_QUEUE_TOKEN, OpmlApplyImportQueuePort } from '../../../infrastructure/queue/queue.constants';
 import { OpmlImportsRepository } from '../opml-imports.repository';
 
 @Injectable()
@@ -14,7 +9,10 @@ export class ConfirmOpmlImportUseCase {
     @Inject(OPML_APPLY_IMPORT_QUEUE_TOKEN) private readonly opmlApplyImportQueue: OpmlApplyImportQueuePort,
   ) {}
 
-  async execute(importId: number, tenantId = 'legacy'): Promise<{ id: string; status: 'queued' | 'already_confirmed' }> {
+  async execute(
+    importId: number,
+    tenantId = 'legacy',
+  ): Promise<{ id: string; status: 'queued' | 'already_confirmed' }> {
     const current = await this.opmlImportsRepository.getImportOrThrow(importId, tenantId);
 
     if (current.status === 'importing' || current.status === 'completed') {

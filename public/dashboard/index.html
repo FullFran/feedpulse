@@ -1,47 +1,143 @@
 <!doctype html>
 <html lang="en">
   <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>RSS Operations Dashboard</title>
-    <link rel="stylesheet" href="/dashboard/styles.css">
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FeedPulse — Operator Dashboard</title>
+    <meta
+      name="description"
+      content="Operator dashboard for the FeedPulse RSS monitoring API: register feeds, manage keyword rules, inspect entries and alerts, import OPML and configure notification channels."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230b1120'/%3E%3Cpath%20d='M4.5%2019.5h4.2l2.6-8.6%203.8%2013.2%203.1-10.4%202.3%205.8h4.9'%20fill='none'%20stroke='%2360a5fa'%20stroke-width='2.6'%20stroke-linecap='round'%20stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/dashboard/styles.css" />
   </head>
   <body>
     <main class="shell">
-      <header>
-        <h1>RSS Operations Dashboard</h1>
-        <p>Cliente operativo para gestionar feeds, reglas, alertas, búsquedas y OPML desde una sola vista.</p>
+      <header class="masthead">
+        <svg class="masthead-mark" viewBox="0 0 32 32" role="img" aria-label="FeedPulse logo" focusable="false">
+          <rect width="32" height="32" rx="7" fill="currentColor" opacity="0.08" />
+          <path
+            d="M4.5 19.5h4.2l2.6-8.6 3.8 13.2 3.1-10.4 2.3 5.8h4.9"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+        <div>
+          <h1>FeedPulse</h1>
+          <p class="tagline">
+            Operator console for the FeedPulse API. Register RSS feeds, match new entries against keyword rules, and
+            deliver the resulting alerts over webhook, email or Telegram.
+          </p>
+        </div>
       </header>
 
-      <section class="panel auth-panel">
-        <p id="auth-mode" class="feedback">Modo auth: API key manual.</p>
-        <label>
-          API Key
-          <input id="api-key" type="password" placeholder="ak_..." autocomplete="off">
-        </label>
-        <div class="row">
-          <button id="save-key" type="button">Guardar key</button>
-          <button id="clerk-sign-in" type="button">Sign in (Clerk)</button>
-          <button id="clerk-sign-out" type="button">Sign out</button>
-          <button id="refresh" type="button">Refrescar</button>
-          <a href="/docs" target="_blank" rel="noreferrer">API Docs</a>
+      <section class="panel auth-panel" aria-labelledby="auth-heading">
+        <h2 id="auth-heading">Access</h2>
+        <p class="panel-hint">
+          The dashboard is served from the API origin and calls it with a tenant API key, sent as both
+          <code>Authorization: Bearer &lt;key&gt;</code> and <code>x-api-key</code>. Create a key with
+          <code>npm run apikey:create</code>. The key is held in this tab's <code>sessionStorage</code> only, so it is
+          gone when the tab closes. When the API runs with <code>ENABLE_AUTH=false</code> — the default, and what a
+          fresh <code>docker compose up</code> gives you — any placeholder value is accepted and every request resolves
+          to the shared <code>legacy</code> tenant.
+        </p>
+        <p id="auth-mode" class="feedback banner" data-tone="info">Auth mode: manual API key.</p>
+
+        <div class="auth-grid">
+          <label>
+            API key
+            <input id="api-key" type="password" placeholder="ak_..." autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="row">
+            <button id="save-key" type="button">Save key</button>
+            <button id="clerk-sign-in" class="btn-secondary" type="button">Sign in with Clerk</button>
+            <button id="clerk-sign-out" class="btn-secondary" type="button">Sign out</button>
+            <button id="refresh" class="btn-secondary" type="button">Refresh all</button>
+            <a href="/docs" target="_blank" rel="noreferrer">API docs</a>
+          </div>
         </div>
-        <p id="auth-feedback" class="feedback"></p>
+        <p id="auth-feedback" class="feedback" role="status" aria-live="polite"></p>
       </section>
 
-      <nav class="tabs" aria-label="Dashboard sections">
-        <button id="tab-btn-overview" class="tab-btn active" type="button">Overview</button>
-        <button id="tab-btn-feeds" class="tab-btn" type="button">Feeds</button>
-        <button id="tab-btn-rules-alerts" class="tab-btn" type="button">Rules / Alerts</button>
-        <button id="tab-btn-entries" class="tab-btn" type="button">Entries search</button>
-        <button id="tab-btn-opml" class="tab-btn" type="button">OPML</button>
-        <button id="tab-btn-settings" class="tab-btn" type="button">Settings</button>
+      <nav class="tabs" role="tablist" aria-label="Dashboard sections">
+        <button
+          id="tab-btn-overview"
+          class="tab-btn active"
+          type="button"
+          role="tab"
+          aria-controls="tab-overview"
+          aria-selected="true"
+        >
+          Overview
+        </button>
+        <button
+          id="tab-btn-feeds"
+          class="tab-btn"
+          type="button"
+          role="tab"
+          aria-controls="tab-feeds"
+          aria-selected="false"
+        >
+          Feeds
+        </button>
+        <button
+          id="tab-btn-rules-alerts"
+          class="tab-btn"
+          type="button"
+          role="tab"
+          aria-controls="tab-rules-alerts"
+          aria-selected="false"
+        >
+          Rules &amp; alerts
+        </button>
+        <button
+          id="tab-btn-entries"
+          class="tab-btn"
+          type="button"
+          role="tab"
+          aria-controls="tab-entries"
+          aria-selected="false"
+        >
+          Entries
+        </button>
+        <button
+          id="tab-btn-opml"
+          class="tab-btn"
+          type="button"
+          role="tab"
+          aria-controls="tab-opml"
+          aria-selected="false"
+        >
+          OPML
+        </button>
+        <button
+          id="tab-btn-settings"
+          class="tab-btn"
+          type="button"
+          role="tab"
+          aria-controls="tab-settings"
+          aria-selected="false"
+        >
+          Settings
+        </button>
       </nav>
 
-      <section id="tab-overview" class="tab-panel">
-        <section id="summary" class="kpis"></section>
-        <section class="panel">
-          <h2>Salud rápida</h2>
+      <section id="tab-overview" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-overview" tabindex="0">
+        <section id="summary" class="kpis" aria-label="Tenant counters"></section>
+        <section class="panel" aria-labelledby="health-heading">
+          <h2 id="health-heading">Service health</h2>
+          <p class="panel-hint">
+            Live values from the <code>/health</code> liveness probe and the <code>/ready</code> readiness probe.
+            Readiness checks PostgreSQL, Redis and the migration schema, so it reports an error while any of them is
+            unavailable.
+          </p>
           <div class="kpis health-kpis">
             <article class="kpi">
               <div class="label">Health</div>
@@ -52,331 +148,457 @@
               <div id="health-ready" class="value">-</div>
             </article>
           </div>
-          <p id="overview-feedback" class="feedback"></p>
+          <p id="overview-feedback" class="feedback" role="status" aria-live="polite"></p>
         </section>
       </section>
 
-      <section id="tab-feeds" class="tab-panel" hidden>
-        <section class="panel">
-          <h2>Crear feed</h2>
-          <form id="feed-create-form" class="filters form-compact">
+      <section id="tab-feeds" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-feeds" tabindex="0" hidden>
+        <section class="panel" aria-labelledby="feed-create-heading">
+          <h2 id="feed-create-heading">Add a feed</h2>
+          <p class="panel-hint">
+            The scheduler polls each active feed on its own interval. Paused feeds stay registered but are never
+            fetched.
+          </p>
+          <form id="feed-create-form" class="filters">
             <label>
-              URL
-              <input id="feed-url" type="url" placeholder="https://example.com/rss.xml" required>
+              Feed URL
+              <input id="feed-url" type="url" placeholder="https://example.com/rss.xml" required />
             </label>
             <label>
-              Poll interval (s)
-              <input id="feed-poll-interval" type="number" value="1800" min="300" max="10800">
+              Poll interval (seconds, 300-10800)
+              <input id="feed-poll-interval" type="number" value="1800" min="300" max="10800" />
             </label>
             <label>
-              Estado inicial
+              Initial status
               <select id="feed-status">
                 <option value="active">active</option>
                 <option value="paused">paused</option>
                 <option value="error">error</option>
               </select>
             </label>
-            <button type="submit">Crear feed</button>
+            <button type="submit">Add feed</button>
           </form>
-          <p id="feeds-feedback" class="feedback"></p>
+          <p id="feeds-feedback" class="feedback" role="status" aria-live="polite"></p>
         </section>
 
-        <section class="panel">
-          <h2>Feeds</h2>
-          <form id="feeds-filter" class="filters form-compact">
+        <section class="panel" aria-labelledby="feeds-heading">
+          <h2 id="feeds-heading">Feeds</h2>
+          <p class="panel-hint">
+            Search matches any substring of the feed URL. <em>Check now</em> queues an immediate fetch;
+            <em>Disable</em> is a soft delete, so the feed stops being polled but its entries are kept.
+          </p>
+          <form id="feeds-filter" class="filters">
             <label>
-              Estado
+              Status
               <select id="feeds-filter-status">
-                <option value="">todos</option>
+                <option value="">All</option>
                 <option value="active">active</option>
                 <option value="paused">paused</option>
                 <option value="error">error</option>
               </select>
             </label>
             <label>
-              Buscar
-              <input id="feeds-filter-q" type="text" placeholder="example.com">
+              Search URL
+              <input id="feeds-filter-q" type="text" placeholder="example.com" />
             </label>
             <label>
-              Tamaño página
-              <input id="feeds-page-size" type="number" value="25" min="1" max="200">
+              Page size (1-200)
+              <input id="feeds-page-size" type="number" value="25" min="1" max="200" />
             </label>
-            <button type="submit">Cargar feeds</button>
+            <button type="submit">Load feeds</button>
           </form>
-          <p id="feeds-meta" class="feedback"></p>
+          <p id="feeds-meta" class="feedback" role="status" aria-live="polite"></p>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>URL</th>
-                  <th>Status</th>
-                  <th>Next check</th>
-                  <th>Acciones</th>
+                  <th scope="col">ID</th>
+                  <th scope="col">URL</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Next check</th>
+                  <th scope="col">Actions</th>
                 </tr>
               </thead>
-              <tbody id="feeds-body"></tbody>
+              <tbody id="feeds-body">
+                <tr class="empty-row">
+                  <td colspan="5">
+                    <div class="empty-state">
+                      <p class="empty-title">No feeds loaded</p>
+                      <p class="empty-hint">
+                        Add a feed with the form above, or import an existing subscription list from the OPML tab.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </div>
           <div class="pager">
-            <button id="feeds-prev" type="button">Anterior</button>
-            <span id="feeds-page">1</span>
-            <button id="feeds-next" type="button">Siguiente</button>
+            <button id="feeds-prev" type="button">Previous</button>
+            <span>Page <span id="feeds-page">1</span></span>
+            <button id="feeds-next" type="button">Next</button>
           </div>
         </section>
       </section>
 
-      <section id="tab-rules-alerts" class="tab-panel" hidden>
-        <section class="panel">
-          <h2>Crear regla</h2>
-          <form id="rule-create-form" class="filters form-compact">
+      <section
+        id="tab-rules-alerts"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-btn-rules-alerts"
+        tabindex="0"
+        hidden
+      >
+        <section class="panel" aria-labelledby="rule-create-heading">
+          <h2 id="rule-create-heading">Add a rule</h2>
+          <p class="panel-hint">
+            Keywords are comma-separated and matched as whole phrases against the entry title and content,
+            case-insensitively and ignoring accents. <strong>Any</strong> include keyword matching is enough;
+            <strong>any</strong> exclude keyword blocks the alert. Up to 20 keywords per list, 200 characters each.
+          </p>
+          <form id="rule-create-form" class="filters">
             <label>
-              Nombre
-              <input id="rule-name" type="text" maxlength="120" required>
+              Name (max 120 characters)
+              <input id="rule-name" type="text" maxlength="120" placeholder="AI updates" required />
             </label>
             <label>
-              Include keywords (coma)
-              <input id="rule-include" type="text" placeholder="ai, llm" required>
+              Include keywords
+              <input id="rule-include" type="text" placeholder="ai, large language model" required />
             </label>
             <label>
-              Exclude keywords (coma)
-              <input id="rule-exclude" type="text" placeholder="crypto">
+              Exclude keywords
+              <input id="rule-exclude" type="text" placeholder="crypto" />
             </label>
-            <label>
-              <input id="rule-active" type="checkbox" checked>
-              Activa
+            <label class="checkbox-inline">
+              <input id="rule-active" type="checkbox" checked />
+              Active
             </label>
-            <button type="submit">Crear regla</button>
+            <button type="submit">Add rule</button>
           </form>
-          <p id="rules-feedback" class="feedback"></p>
+          <p id="rules-feedback" class="feedback" role="status" aria-live="polite"></p>
         </section>
 
-        <section class="panel">
-          <h2>Reglas</h2>
-          <form id="rules-filter" class="filters form-compact">
+        <section class="panel" aria-labelledby="rules-heading">
+          <h2 id="rules-heading">Rules</h2>
+          <p class="panel-hint">Only active rules are evaluated during ingestion. Disabling a rule is a soft delete.</p>
+          <form id="rules-filter" class="filters">
             <label>
-              Tamaño página
-              <input id="rules-page-size" type="number" value="25" min="1" max="200">
+              Page size (1-200)
+              <input id="rules-page-size" type="number" value="25" min="1" max="200" />
             </label>
-            <button type="submit">Cargar reglas</button>
+            <button type="submit">Load rules</button>
           </form>
-          <p id="rules-meta" class="feedback"></p>
+          <p id="rules-meta" class="feedback" role="status" aria-live="polite"></p>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Nombre</th>
-                  <th>Keywords</th>
-                  <th>Activa</th>
-                  <th>Acciones</th>
+                  <th scope="col">ID</th>
+                  <th scope="col">Name</th>
+                  <th scope="col">Include keywords</th>
+                  <th scope="col">Active</th>
+                  <th scope="col">Actions</th>
                 </tr>
               </thead>
-              <tbody id="rules-body"></tbody>
+              <tbody id="rules-body">
+                <tr class="empty-row">
+                  <td colspan="5">
+                    <div class="empty-state">
+                      <p class="empty-title">No rules loaded</p>
+                      <p class="empty-hint">
+                        Add a rule with the form above. Without an active rule, entries are still ingested but no alert
+                        is ever raised.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </div>
           <div class="pager">
-            <button id="rules-prev" type="button">Anterior</button>
-            <span id="rules-page">1</span>
-            <button id="rules-next" type="button">Siguiente</button>
+            <button id="rules-prev" type="button">Previous</button>
+            <span>Page <span id="rules-page">1</span></span>
+            <button id="rules-next" type="button">Next</button>
           </div>
         </section>
 
-        <section class="panel">
-          <h2>Alerts</h2>
-          <form id="alerts-filter" class="filters form-compact">
+        <section class="panel" aria-labelledby="alerts-heading">
+          <h2 id="alerts-heading">Alerts</h2>
+          <p class="panel-hint">
+            One alert is raised per matching article, carrying every rule it matched. The API exposes no manual create
+            or delete for alerts — from here you can only re-queue an existing one for delivery.
+          </p>
+          <form id="alerts-filter" class="filters">
             <label>
-              Estado
+              Delivery
               <select id="alerts-sent">
-                <option value="">todos</option>
-                <option value="false">pendientes</option>
-                <option value="true">enviadas</option>
+                <option value="">All</option>
+                <option value="false">Not sent</option>
+                <option value="true">Sent</option>
               </select>
             </label>
             <label>
-              Tamaño página
-              <input id="alerts-page-size" type="number" value="25" min="1" max="200">
+              Page size (1-200)
+              <input id="alerts-page-size" type="number" value="25" min="1" max="200" />
             </label>
-            <button type="submit">Cargar alerts</button>
+            <button type="submit">Load alerts</button>
           </form>
-          <p class="feedback">El API no expone crear/eliminar alerts manualmente. Desde aquí puedes reenviar pendientes.</p>
-          <p id="alerts-feedback" class="feedback"></p>
-          <p id="alerts-meta" class="feedback"></p>
+          <p id="alerts-feedback" class="feedback" role="status" aria-live="polite"></p>
+          <p id="alerts-meta" class="feedback" role="status" aria-live="polite"></p>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Estado</th>
-                  <th>Rule</th>
-                  <th>Título entry</th>
-                  <th>Acciones</th>
+                  <th scope="col">ID</th>
+                  <th scope="col">Delivery</th>
+                  <th scope="col">Rule</th>
+                  <th scope="col">Entry title</th>
+                  <th scope="col">Actions</th>
                 </tr>
               </thead>
-              <tbody id="alerts-body"></tbody>
+              <tbody id="alerts-body">
+                <tr class="empty-row">
+                  <td colspan="5">
+                    <div class="empty-state">
+                      <p class="empty-title">No alerts loaded</p>
+                      <p class="empty-hint">
+                        An alert appears once an ingested entry matches an active rule. Add a feed and a rule, then use
+                        <em>Check now</em> on the Feeds tab.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </div>
           <div class="pager">
-            <button id="alerts-prev" type="button">Anterior</button>
-            <span id="alerts-page">1</span>
-            <button id="alerts-next" type="button">Siguiente</button>
+            <button id="alerts-prev" type="button">Previous</button>
+            <span>Page <span id="alerts-page">1</span></span>
+            <button id="alerts-next" type="button">Next</button>
           </div>
         </section>
       </section>
 
-      <section id="tab-entries" class="tab-panel" hidden>
-        <section class="panel">
-          <h2>Filtrar noticias</h2>
+      <section id="tab-entries" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-entries" tabindex="0" hidden>
+        <section class="panel" aria-labelledby="entries-heading">
+          <h2 id="entries-heading">Entries</h2>
+          <p class="panel-hint">
+            Every entry persisted by the ingestion pipeline, newest first. The date filters apply to the published date
+            and fall back to the fetch date when a feed omits one.
+          </p>
           <form id="entries-filter" class="filters">
             <label>
-              Desde
-              <input id="from" name="from" type="datetime-local">
+              From
+              <input id="from" name="from" type="datetime-local" />
             </label>
             <label>
-              Hasta
-              <input id="to" name="to" type="datetime-local">
+              To
+              <input id="to" name="to" type="datetime-local" />
             </label>
             <label>
-              Palabras clave
-              <input id="search" name="search" type="text" placeholder="okupa sarep ...">
+              Search (max 200 characters)
+              <input id="search" name="search" type="text" placeholder="quarterly results" />
             </label>
             <label>
-              Tamaño página
-              <input id="page-size" name="page_size" type="number" value="50" min="1" max="200">
+              Page size (1-200)
+              <input id="page-size" name="page_size" type="number" value="50" min="1" max="200" />
             </label>
-            <button type="submit">Buscar</button>
+            <button type="submit">Search entries</button>
           </form>
-          <p id="entries-meta" class="feedback"></p>
+          <p id="entries-meta" class="feedback" role="status" aria-live="polite"></p>
 
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Fecha</th>
-                  <th>Título</th>
-                  <th>Feed</th>
-                  <th>Enlace</th>
+                  <th scope="col">Date</th>
+                  <th scope="col">Title</th>
+                  <th scope="col">Feed</th>
+                  <th scope="col">Link</th>
                 </tr>
               </thead>
-              <tbody id="entries-body"></tbody>
+              <tbody id="entries-body">
+                <tr class="empty-row">
+                  <td colspan="4">
+                    <div class="empty-state">
+                      <p class="empty-title">No entries loaded</p>
+                      <p class="empty-hint">
+                        Entries appear after a feed has been fetched. Add a feed, then use <em>Check now</em> on the
+                        Feeds tab instead of waiting for the next scheduled poll.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </div>
           <div class="pager">
-            <button id="entries-prev" type="button">Anterior</button>
-            <span id="entries-page">1</span>
-            <button id="entries-next" type="button">Siguiente</button>
+            <button id="entries-prev" type="button">Previous</button>
+            <span>Page <span id="entries-page">1</span></span>
+            <button id="entries-next" type="button">Next</button>
           </div>
         </section>
       </section>
 
-      <section id="tab-opml" class="tab-panel" hidden>
-        <section class="panel">
-          <h2>Importar OPML</h2>
-          <form id="opml-upload-form" class="filters form-compact">
+      <section id="tab-opml" class="tab-panel" role="tabpanel" aria-labelledby="tab-btn-opml" tabindex="0" hidden>
+        <section class="panel" aria-labelledby="opml-upload-heading">
+          <h2 id="opml-upload-heading">Import OPML</h2>
+          <p class="panel-hint">
+            Upload an OPML export from another reader. The import is parsed and staged first: nothing is registered
+            until you confirm it below.
+          </p>
+          <form id="opml-upload-form" class="filters">
             <label>
-              Archivo OPML/XML
-              <input id="opml-file" type="file" accept=".opml,.xml,text/xml,application/xml,text/x-opml" required>
+              OPML or XML file
+              <input id="opml-file" type="file" accept=".opml,.xml,text/xml,application/xml,text/x-opml" required />
             </label>
-            <button type="submit">Subir y parsear</button>
+            <button type="submit">Upload and parse</button>
           </form>
-          <p id="opml-feedback" class="feedback"></p>
+          <p id="opml-feedback" class="feedback" role="status" aria-live="polite"></p>
         </section>
 
-        <section class="panel">
-          <h2>Preview & confirm</h2>
-          <form id="opml-preview-form" class="filters form-compact">
+        <section class="panel" aria-labelledby="opml-preview-heading">
+          <h2 id="opml-preview-heading">Preview and confirm</h2>
+          <p class="panel-hint">
+            The import id is filled in automatically after an upload. Review the parsed items, then confirm to register
+            the valid ones as feeds.
+          </p>
+          <form id="opml-preview-form" class="filters">
             <label>
               Import ID
-              <input id="opml-import-id" type="number" min="1" placeholder="123">
+              <input id="opml-import-id" type="number" min="1" placeholder="123" />
             </label>
             <label>
-              Tamaño página
-              <input id="opml-preview-page-size" type="number" value="25" min="1" max="200">
+              Page size (1-200)
+              <input id="opml-preview-page-size" type="number" value="25" min="1" max="200" />
             </label>
-            <button id="opml-preview-refresh" type="submit">Ver preview</button>
-            <button id="opml-confirm" type="button">Confirmar import</button>
-            <button id="opml-status-refresh" type="button">Ver status</button>
+            <button id="opml-preview-refresh" type="submit">Load preview</button>
           </form>
-          <p id="opml-status-output" class="feedback"></p>
-          <p id="opml-preview-meta" class="feedback"></p>
+          <div class="row">
+            <button id="opml-confirm" class="btn-secondary" type="button">Confirm import</button>
+            <button id="opml-status-refresh" class="btn-secondary" type="button">Check status</button>
+          </div>
+          <p id="opml-status-output" class="feedback" role="status" aria-live="polite"></p>
+          <p id="opml-preview-meta" class="feedback" role="status" aria-live="polite"></p>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Title</th>
-                  <th>URL</th>
-                  <th>Status</th>
-                  <th>Validation</th>
+                  <th scope="col">ID</th>
+                  <th scope="col">Title</th>
+                  <th scope="col">URL</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Validation</th>
                 </tr>
               </thead>
-              <tbody id="opml-preview-body"></tbody>
+              <tbody id="opml-preview-body">
+                <tr class="empty-row">
+                  <td colspan="5">
+                    <div class="empty-state">
+                      <p class="empty-title">No preview loaded</p>
+                      <p class="empty-hint">Upload an OPML file above, then load the preview for its import id.</p>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
             </table>
           </div>
           <div class="pager">
-            <button id="opml-preview-prev" type="button">Anterior</button>
-            <span id="opml-preview-page">1</span>
-            <button id="opml-preview-next" type="button">Siguiente</button>
+            <button id="opml-preview-prev" type="button">Previous</button>
+            <span>Page <span id="opml-preview-page">1</span></span>
+            <button id="opml-preview-next" type="button">Next</button>
           </div>
+        </section>
       </section>
 
-      </section>
-
-      <section id="tab-settings" class="tab-panel" hidden>
-        <section class="panel">
-          <h2>Canales de notificación</h2>
-          <p class="feedback">Configura por tenant cómo se envían alertas por Webhook, Email y Telegram.</p>
-          <p id="settings-feedback" class="feedback settings-banner" data-tone="info">Sin cambios pendientes.</p>
+      <section
+        id="tab-settings"
+        class="tab-panel"
+        role="tabpanel"
+        aria-labelledby="tab-btn-settings"
+        tabindex="0"
+        hidden
+      >
+        <section class="panel" aria-labelledby="settings-heading">
+          <h2 id="settings-heading">Notification channels</h2>
+          <p class="panel-hint">
+            Per-tenant delivery settings. Every configured channel receives every alert; leaving a channel empty
+            disables it for this tenant. Email also requires the server to hold a Resend API key and sender address, and
+            Telegram requires a bot token — either the per-tenant one below or the deployment-wide fallback.
+          </p>
+          <p id="settings-feedback" class="feedback banner" data-tone="info" role="status" aria-live="polite">
+            No pending changes.
+          </p>
 
           <form id="settings-form" class="settings-form">
             <article class="settings-card">
               <h3>Webhook</h3>
-              <p class="settings-help">Se envía cada alerta al endpoint configurado.</p>
+              <p class="settings-help">Each alert is POSTed to this endpoint.</p>
               <label>
-                URL del webhook
-                <input id="settings-webhook-url" type="url" placeholder="https://hooks.example.com/rss-alerts">
+                Webhook URL
+                <input id="settings-webhook-url" type="url" placeholder="https://hooks.example.com/feedpulse" />
               </label>
             </article>
 
             <article class="settings-card">
               <h3>Email (Resend)</h3>
-              <p class="settings-help">Emails destino separados por coma o por línea.</p>
+              <p class="settings-help">Recipient addresses, separated by commas or newlines.</p>
               <label>
-                Destinatarios
-                <textarea id="settings-recipient-emails" rows="4" placeholder="alerts@example.com&#10;ops@example.com"></textarea>
+                Recipients
+                <textarea
+                  id="settings-recipient-emails"
+                  rows="4"
+                  placeholder="alerts@example.com&#10;ops@example.com"
+                ></textarea>
               </label>
             </article>
 
             <article class="settings-card">
               <h3>Telegram</h3>
-              <p class="settings-help">IDs de chat separados por coma o línea. Modo aplica solo al canal Telegram.</p>
-              <p id="settings-telegram-token-status" class="feedback settings-token-state" data-tone="warn">Token por tenant no configurado.</p>
+              <p class="settings-help">
+                Chat IDs, separated by commas or newlines. The delivery mode applies to the Telegram channel only.
+              </p>
+              <p id="settings-telegram-token-status" class="feedback settings-token-state" data-tone="warn">
+                Tenant token not configured.
+              </p>
               <label>
-                Bot token (opcional por tenant)
-                <input id="settings-telegram-bot-token" type="password" placeholder="123456:AA..." autocomplete="new-password">
+                Bot token (optional, per tenant)
+                <input
+                  id="settings-telegram-bot-token"
+                  type="password"
+                  placeholder="123456:AA..."
+                  autocomplete="new-password"
+                />
               </label>
               <label class="checkbox-inline">
-                <input id="settings-telegram-token-clear" type="checkbox">
-                Limpiar token por tenant guardado
+                <input id="settings-telegram-token-clear" type="checkbox" />
+                Clear the stored tenant token
               </label>
-              <p class="settings-help">Deja el token vacío para no cambiarlo. Escribe uno nuevo para reemplazarlo. Marca "Limpiar" para borrar el token del tenant.</p>
+              <p class="settings-help">
+                Leave the token empty to keep the current one. Type a new value to replace it. Tick "Clear" to remove
+                the tenant token and fall back to the global one, if the deployment sets it.
+              </p>
               <label>
                 Chat IDs
-                <textarea id="settings-telegram-chat-ids" rows="4" placeholder="-1001234567890&#10;987654321"></textarea>
+                <textarea
+                  id="settings-telegram-chat-ids"
+                  rows="4"
+                  placeholder="-1001234567890&#10;987654321"
+                ></textarea>
               </label>
               <label>
-                Modo de entrega Telegram
+                Telegram delivery mode
                 <select id="settings-telegram-mode">
-                  <option value="instant">Instantáneo (mensaje por alerta)</option>
-                  <option value="digest_10m">Resumen cada 10 minutos</option>
+                  <option value="instant">Instant (one message per alert)</option>
+                  <option value="digest_10m">Digest every 10 minutes</option>
                 </select>
               </label>
             </article>
 
             <div class="settings-actions">
-              <button id="settings-save" type="submit">Guardar cambios</button>
-              <button id="settings-clear" type="button">Limpiar canales</button>
-              <button id="settings-refresh" type="button">Recargar configuración</button>
+              <button id="settings-save" type="submit">Save changes</button>
+              <button id="settings-clear" class="btn-secondary" type="button">Clear all channels</button>
+              <button id="settings-refresh" class="btn-secondary" type="button">Reload settings</button>
             </div>
           </form>
         </section>

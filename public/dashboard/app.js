@@ -19,6 +19,8 @@ const state = {
     clerkEnabled: false,
     clerkReady: false,
     clerkToken: '',
+    // In-memory cache; `null` means "not read from sessionStorage yet".
+    apiKey: null,
   },
 };
 
@@ -39,12 +41,76 @@ function getById(id) {
   return node;
 }
 
+function safeStorage(name) {
+  try {
+    const storage = globalThis[name];
+    if (!storage || typeof storage.getItem !== 'function') {
+      return null;
+    }
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Removes any API key persisted by older builds. The key used to live in
+ * localStorage, which survives browser restarts and is readable by every script
+ * running on this origin. It is migrated once into sessionStorage and then dropped.
+ */
+function migrateLegacyApiKeyStorage() {
+  const legacy = safeStorage('localStorage');
+  if (!legacy) {
+    return;
+  }
+
+  try {
+    const stored = (legacy.getItem(KEY_STORAGE) || '').trim();
+    if (stored) {
+      setApiKey(stored);
+    }
+    if (typeof legacy.removeItem === 'function') {
+      legacy.removeItem(KEY_STORAGE);
+    }
+  } catch {
+    // Storage disabled by the browser: nothing to migrate.
+  }
+}
+
 function getApiKey() {
-  return (localStorage.getItem(KEY_STORAGE) || '').trim();
+  if (state.auth.apiKey !== null) {
+    return state.auth.apiKey;
+  }
+
+  const storage = safeStorage('sessionStorage');
+  let stored = '';
+  try {
+    stored = storage ? (storage.getItem(KEY_STORAGE) || '').trim() : '';
+  } catch {
+    stored = '';
+  }
+
+  state.auth.apiKey = stored;
+  return state.auth.apiKey;
 }
 
 function setApiKey(value) {
-  localStorage.setItem(KEY_STORAGE, value.trim());
+  state.auth.apiKey = String(value || '').trim();
+
+  const storage = safeStorage('sessionStorage');
+  if (!storage) {
+    return;
+  }
+
+  try {
+    if (state.auth.apiKey) {
+      storage.setItem(KEY_STORAGE, state.auth.apiKey);
+    } else if (typeof storage.removeItem === 'function') {
+      storage.removeItem(KEY_STORAGE);
+    }
+  } catch {
+    // Storage disabled by the browser: the in-memory value still works for this tab.
+  }
 }
 
 function toIsoOrUndefined(value) {
@@ -59,6 +125,27 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+/**
+ * Returns an escaped href that is safe to inline in `innerHTML`, or '#'.
+ *
+ * Feed and entry URLs are remote-controlled: a hostile feed can publish
+ * `<link>javascript:...</link>` and, because the dashboard is served from the API
+ * origin, a single click would run attacker code with access to the operator's
+ * credentials. `escapeHtml` alone does not restrict the URL scheme, so only
+ * absolute http/https URLs are accepted here.
+ */
+function safeHref(value) {
+  const raw = String(value ?? '');
+  // Browsers ignore control characters and whitespace while parsing the scheme,
+  // so `java\tscript:` must be normalised before the check.
+  const normalized = raw.replace(/[\u0000-\u0020\u007F]/g, '');
+  if (!/^https?:\/\//i.test(normalized)) {
+    return '#';
+  }
+
+  return escapeHtml(normalized);
 }
 
 function formatDate(value) {
@@ -101,6 +188,52 @@ function setFeedback(id, text, tone = 'info') {
   node.dataset.tone = tone;
 }
 
+/**
+ * Sets an attribute only when the node actually supports it.
+ *
+ * The dashboard client is exercised by `test/dashboard-client.spec.ts` against a
+ * minimal DOM double that implements `textContent`, `dataset`, `classList` and
+ * `hidden` but no attribute API. ARIA state is progressive enhancement for the
+ * browser, so it must never be the reason the module throws.
+ */
+function setAttributeIfSupported(node, name, value) {
+  if (node && typeof node.setAttribute === 'function') {
+    node.setAttribute(name, value);
+  }
+}
+
+/** Moves focus when the environment supports it (see `setAttributeIfSupported`). */
+function focusIfSupported(node) {
+  if (node && typeof node.focus === 'function') {
+    node.focus();
+  }
+}
+
+/**
+ * Full-width placeholder row.
+ *
+ * A blank `<tbody>` is indistinguishable from a request that silently failed, so
+ * every table states what it is empty *and* what the operator can do next.
+ */
+function emptyStateRow(columns, title, hint) {
+  return `
+    <tr class="empty-row">
+      <td colspan="${columns}">
+        <div class="empty-state">
+          <p class="empty-title">${escapeHtml(title)}</p>
+          <p class="empty-hint">${escapeHtml(hint)}</p>
+        </div>
+      </td>
+    </tr>
+  `;
+}
+
+/** Status pill. `data-status` drives the colour; see the badge rules in styles.css. */
+function statusBadge(value) {
+  const label = escapeHtml(String(value ?? '-'));
+  return `<span class="badge" data-status="${label}">${label}</span>`;
+}
+
 async function ensureClerkToken() {
   const clerk = globalThis.Clerk;
   if (!state.auth.clerkEnabled || !clerk || !clerk.session) {
@@ -135,23 +268,28 @@ async function requireAuth() {
 }
 
 function renderAuthMode() {
-  const modeNode = getById('auth-mode');
+  // The Clerk buttons are inert until `/api/v1/auth/dashboard-config` reports a
+  // publishable key and the SDK has loaded. Leaving them enabled makes the
+  // dashboard look broken on the far more common API-key-only deployment.
+  getById('clerk-sign-in').disabled = !(state.auth.clerkEnabled && state.auth.clerkReady);
+  getById('clerk-sign-out').disabled = !state.auth.clerkToken;
+
   if (getApiKey()) {
-    modeNode.textContent = 'Modo auth: API key manual.';
+    setFeedback('auth-mode', 'Auth mode: manual API key.', 'success');
     return;
   }
 
   if (state.auth.clerkToken) {
-    modeNode.textContent = 'Modo auth: Clerk session.';
+    setFeedback('auth-mode', 'Auth mode: Clerk session.', 'success');
     return;
   }
 
   if (state.auth.clerkEnabled) {
-    modeNode.textContent = 'Modo auth: Clerk disponible (sin sesión) o API key manual.';
+    setFeedback('auth-mode', 'Auth mode: Clerk available (no active session), or a manual API key.', 'info');
     return;
   }
 
-  modeNode.textContent = 'Modo auth: API key manual.';
+  setFeedback('auth-mode', 'Auth mode: manual API key. No credential stored yet.', 'info');
 }
 
 async function buildHeaders(extra = {}) {
@@ -204,6 +342,12 @@ function switchTab(tabId) {
     const isActive = tab === tabId;
     panel.hidden = !isActive;
     button.classList.toggle('active', isActive);
+    // Roving tabindex: the tablist is a single tab stop and the arrow keys move
+    // between the tabs inside it, which is what a screen reader announces for
+    // `role="tab"`. The static markup sets no tabindex, so if this script fails
+    // to run every tab stays reachable with Tab alone.
+    setAttributeIfSupported(button, 'aria-selected', isActive ? 'true' : 'false');
+    setAttributeIfSupported(button, 'tabindex', isActive ? '0' : '-1');
   }
 }
 
@@ -211,15 +355,18 @@ function renderSummary(summary) {
   const root = getById('summary');
   const cards = [
     ['Feeds total', summary.feedsTotal],
-    ['Feeds activos', summary.feedsActive],
-    ['Feeds error', summary.feedsError],
+    ['Feeds active', summary.feedsActive],
+    ['Feeds in error', summary.feedsError],
     ['Entries 24h', summary.entries24h],
     ['Entries 7d', summary.entries7d],
-    ['Alerts pendientes', summary.alertsPending],
+    ['Alerts pending', summary.alertsPending],
   ];
 
   root.innerHTML = cards
-    .map(([label, value]) => `<article class="kpi"><div class="label">${label}</div><div class="value">${value}</div></article>`)
+    .map(
+      ([label, value]) =>
+        `<article class="kpi"><div class="label">${label}</div><div class="value">${escapeHtml(value ?? '-')}</div></article>`,
+    )
     .join('');
 }
 
@@ -237,26 +384,28 @@ function renderEntries(payload) {
   const page = payload.meta?.page ?? state.entriesPage;
   const hasNext = Boolean(payload.meta?.has_next);
 
-  meta.textContent = `${items.length} resultados mostrados (total: ${total}).`;
+  meta.textContent = `Showing ${items.length} of ${total} entries.`;
   meta.dataset.tone = 'info';
   updatePager('entries', page, hasNext);
 
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="4">Sin resultados</td></tr>';
+    tbody.innerHTML = emptyStateRow(
+      4,
+      'No entries match this search',
+      'Widen the date range or clear the search box. Entries only exist after a feed has been fetched — use "Check now" on the Feeds tab instead of waiting for the next scheduled poll.',
+    );
     return;
   }
 
   tbody.innerHTML = items
     .map((entry) => {
-      const title = escapeHtml(entry.title || '(sin título)');
-      const link = entry.link
-        ? `<a href="${escapeHtml(entry.link)}" target="_blank" rel="noreferrer">abrir</a>`
-        : '-';
+      const title = escapeHtml(entry.title || '(untitled)');
+      const link = entry.link ? `<a href="${safeHref(entry.link)}" target="_blank" rel="noreferrer">Open</a>` : '-';
       return `
         <tr>
-          <td>${escapeHtml(formatDate(entry.publishedAt || entry.fetchedAt))}</td>
-          <td>${title}</td>
-          <td>${escapeHtml(entry.feedId)}</td>
+          <td class="numeric">${escapeHtml(formatDate(entry.publishedAt || entry.fetchedAt))}</td>
+          <td><span class="cell-truncate">${title}</span></td>
+          <td class="numeric">${escapeHtml(entry.feedId)}</td>
           <td>${link}</td>
         </tr>
       `;
@@ -272,12 +421,16 @@ function renderFeeds(payload) {
   const page = payload.meta?.page ?? state.feedsPage;
   const hasNext = Boolean(payload.meta?.has_next);
 
-  meta.textContent = `${items.length} feeds mostrados (total: ${total}).`;
+  meta.textContent = `Showing ${items.length} of ${total} feeds.`;
   meta.dataset.tone = 'info';
   updatePager('feeds', page, hasNext);
 
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="5">Sin feeds</td></tr>';
+    tbody.innerHTML = emptyStateRow(
+      5,
+      'No feeds registered',
+      'Add a feed with the form above, or import an existing subscription list from the OPML tab.',
+    );
     return;
   }
 
@@ -288,10 +441,12 @@ function renderFeeds(payload) {
       const deleteDisabled = state.capabilities.feedDelete ? '' : 'disabled';
       return `
         <tr>
-          <td>${feed.id}</td>
-          <td><a href="${escapeHtml(feed.url)}" target="_blank" rel="noreferrer">${escapeHtml(feed.url)}</a></td>
-          <td>${escapeHtml(feed.status)}</td>
-          <td>${escapeHtml(formatDate(feed.nextCheckAt))}</td>
+          <td class="numeric">${feed.id}</td>
+          <td>
+            <a class="cell-truncate" href="${safeHref(feed.url)}" target="_blank" rel="noreferrer">${escapeHtml(feed.url)}</a>
+          </td>
+          <td>${statusBadge(feed.status)}</td>
+          <td class="numeric">${escapeHtml(formatDate(feed.nextCheckAt))}</td>
           <td>
             <button type="button" data-feed-action="check" data-feed-id="${feed.id}">Check now</button>
             <button type="button" data-feed-action="toggle" data-feed-id="${feed.id}" data-feed-status="${nextStatus}">${toggleLabel}</button>
@@ -311,12 +466,16 @@ function renderRules(payload) {
   const page = payload.meta?.page ?? state.rulesPage;
   const hasNext = Boolean(payload.meta?.has_next);
 
-  meta.textContent = `${items.length} reglas mostradas (total: ${total}).`;
+  meta.textContent = `Showing ${items.length} of ${total} rules.`;
   meta.dataset.tone = 'info';
   updatePager('rules', page, hasNext);
 
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="5">Sin reglas</td></tr>';
+    tbody.innerHTML = emptyStateRow(
+      5,
+      'No rules defined',
+      'Add a rule with the form above. Without an active rule, entries are still ingested but no alert is ever raised.',
+    );
     return;
   }
 
@@ -325,10 +484,10 @@ function renderRules(payload) {
       const deleteDisabled = state.capabilities.ruleDelete ? '' : 'disabled';
       return `
         <tr>
-          <td>${rule.id}</td>
+          <td class="numeric">${rule.id}</td>
           <td>${escapeHtml(rule.name)}</td>
-          <td>${escapeHtml(rule.includeKeywords.join(', '))}</td>
-          <td>${rule.isActive ? 'sí' : 'no'}</td>
+          <td><span class="cell-truncate">${escapeHtml(rule.includeKeywords.join(', '))}</span></td>
+          <td>${statusBadge(rule.isActive ? 'yes' : 'no')}</td>
           <td><button type="button" data-rule-action="delete" data-rule-id="${rule.id}" ${deleteDisabled}>Disable</button></td>
         </tr>
       `;
@@ -344,27 +503,31 @@ function renderAlerts(payload) {
   const page = payload.meta?.page ?? state.alertsPage;
   const hasNext = Boolean(payload.meta?.has_next);
 
-  meta.textContent = `${items.length} alerts mostradas (total: ${total}).`;
+  meta.textContent = `Showing ${items.length} of ${total} alerts.`;
   meta.dataset.tone = 'info';
   updatePager('alerts', page, hasNext);
 
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="5">Sin alerts</td></tr>';
+    tbody.innerHTML = emptyStateRow(
+      5,
+      'No alerts yet',
+      'An alert is raised when an ingested entry matches an active rule. Check that at least one rule is active and that its feeds have been fetched.',
+    );
     return;
   }
 
   tbody.innerHTML = items
     .map((alert) => {
-      const title = escapeHtml(alert.entry?.title || '(sin título)');
+      const title = escapeHtml(alert.entry?.title || '(untitled)');
       const ruleName = escapeHtml(alert.rule?.name || '-');
       const canSend = alert.deliveryStatus !== 'disabled';
       return `
         <tr>
-          <td>${alert.id}</td>
-          <td>${escapeHtml(alert.deliveryStatus)}</td>
+          <td class="numeric">${alert.id}</td>
+          <td>${statusBadge(alert.deliveryStatus)}</td>
           <td>${ruleName}</td>
-          <td>${title}</td>
-          <td><button type="button" data-alert-action="send" data-alert-id="${alert.id}" ${canSend ? '' : 'disabled'}>Reenviar</button></td>
+          <td><span class="cell-truncate">${title}</span></td>
+          <td><button type="button" data-alert-action="send" data-alert-id="${alert.id}" ${canSend ? '' : 'disabled'}>Resend</button></td>
         </tr>
       `;
     })
@@ -385,18 +548,25 @@ function renderOpmlPreview(payload) {
   updatePager('opml-preview', page, hasNext);
 
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="5">Sin items</td></tr>';
+    tbody.innerHTML = emptyStateRow(
+      5,
+      'No preview items',
+      'Upload an OPML file above, then load the preview for the import id it returns.',
+    );
     return;
   }
 
   tbody.innerHTML = items
     .map((item) => {
+      const url = item.normalizedUrl
+        ? `<a class="cell-truncate" href="${safeHref(item.normalizedUrl)}" target="_blank" rel="noreferrer">${escapeHtml(item.normalizedUrl)}</a>`
+        : '-';
       return `
         <tr>
-          <td>${item.id}</td>
-          <td>${escapeHtml(item.title || '-')}</td>
-          <td>${item.normalizedUrl ? `<a href="${escapeHtml(item.normalizedUrl)}" target="_blank" rel="noreferrer">${escapeHtml(item.normalizedUrl)}</a>` : '-'}</td>
-          <td>${escapeHtml(item.itemStatus)}</td>
+          <td class="numeric">${item.id}</td>
+          <td><span class="cell-truncate">${escapeHtml(item.title || '-')}</span></td>
+          <td>${url}</td>
+          <td>${statusBadge(item.itemStatus)}</td>
           <td>${escapeHtml(item.validationError || '-')}</td>
         </tr>
       `;
@@ -429,9 +599,9 @@ async function loadOverview() {
     renderSummary(summary.data || {});
     getById('health-live').textContent = health.status || '-';
     getById('health-ready').textContent = ready.status || 'error';
-    setFeedback('overview-feedback', 'Overview actualizada.', 'success');
+    setFeedback('overview-feedback', 'Overview updated.', 'success');
   } catch (error) {
-    setFeedback('overview-feedback', `Error overview: ${error.message}`, 'error');
+    setFeedback('overview-feedback', `Overview error: ${error.message}`, 'error');
   }
 }
 
@@ -442,7 +612,7 @@ async function searchEntries() {
     const payload = await api(`/api/v1/entries?${params.toString()}`);
     renderEntries(payload);
   } catch (error) {
-    setFeedback('entries-meta', `Error entries: ${error.message}`, 'error');
+    setFeedback('entries-meta', `Entries error: ${error.message}`, 'error');
   }
 }
 
@@ -457,9 +627,9 @@ async function loadFeeds() {
     if (q) params.set('q', q);
     const payload = await api(`/api/v1/feeds?${params.toString()}`);
     renderFeeds(payload);
-    setFeedback('feeds-feedback', 'Feeds actualizados.', 'success');
+    setFeedback('feeds-feedback', 'Feeds updated.', 'success');
   } catch (error) {
-    setFeedback('feeds-feedback', `Error feeds: ${error.message}`, 'error');
+    setFeedback('feeds-feedback', `Feeds error: ${error.message}`, 'error');
   }
 }
 
@@ -470,9 +640,9 @@ async function loadRules() {
     const params = new URLSearchParams({ page: String(state.rulesPage), page_size: String(pageSize) });
     const payload = await api(`/api/v1/rules?${params.toString()}`);
     renderRules(payload);
-    setFeedback('rules-feedback', 'Reglas actualizadas.', 'success');
+    setFeedback('rules-feedback', 'Rules updated.', 'success');
   } catch (error) {
-    setFeedback('rules-feedback', `Error rules: ${error.message}`, 'error');
+    setFeedback('rules-feedback', `Rules error: ${error.message}`, 'error');
   }
 }
 
@@ -487,9 +657,9 @@ async function loadAlerts() {
     }
     const payload = await api(`/api/v1/alerts?${params.toString()}`);
     renderAlerts(payload);
-    setFeedback('alerts-feedback', 'Alerts actualizadas.', 'success');
+    setFeedback('alerts-feedback', 'Alerts updated.', 'success');
   } catch (error) {
-    setFeedback('alerts-feedback', `Error alerts: ${error.message}`, 'error');
+    setFeedback('alerts-feedback', `Alerts error: ${error.message}`, 'error');
   }
 }
 
@@ -505,7 +675,7 @@ async function loadOpmlPreview() {
   try {
     await requireAuth();
     if (!state.capabilities.opml) {
-      setFeedback('opml-feedback', 'OPML no está disponible en este backend.', 'warn');
+      setFeedback('opml-feedback', 'OPML is not available in this backend.', 'warn');
       return;
     }
 
@@ -517,10 +687,10 @@ async function loadOpmlPreview() {
   } catch (error) {
     if (error instanceof ApiError && [404, 405, 501].includes(error.status)) {
       state.capabilities.opml = false;
-      setFeedback('opml-feedback', 'El backend no soporta OPML import en este entorno.', 'warn');
+      setFeedback('opml-feedback', 'This backend does not support OPML import in this environment.', 'warn');
       return;
     }
-    setFeedback('opml-feedback', `Error OPML preview: ${error.message}`, 'error');
+    setFeedback('opml-feedback', `OPML preview error: ${error.message}`, 'error');
   }
 }
 
@@ -536,7 +706,7 @@ async function loadOpmlStatus() {
       'success',
     );
   } catch (error) {
-    setFeedback('opml-status-output', `Error OPML status: ${error.message}`, 'error');
+    setFeedback('opml-status-output', `OPML status error: ${error.message}`, 'error');
   }
 }
 
@@ -544,7 +714,11 @@ async function refreshAll() {
   try {
     await requireAuth();
   } catch {
-    setFeedback('auth-feedback', 'Inicia sesión con Clerk o ingresa una API key para comenzar.', 'warn');
+    setFeedback(
+      'auth-feedback',
+      'Enter an API key above (or sign in with Clerk) to load data. If the API runs with ENABLE_AUTH=false, any placeholder value is accepted.',
+      'warn',
+    );
     renderAuthMode();
     return;
   }
@@ -552,10 +726,10 @@ async function refreshAll() {
   const results = await Promise.allSettled([loadOverview(), searchEntries(), loadFeeds(), loadRules(), loadAlerts()]);
   const failed = results.filter((result) => result.status === 'rejected').length;
   if (failed > 0) {
-    setFeedback('auth-feedback', `Actualización parcial (${failed} fallos).`, 'warn');
+    setFeedback('auth-feedback', `Partial refresh (${failed} failures).`, 'warn');
     return;
   }
-  setFeedback('auth-feedback', 'Datos actualizados.', 'success');
+  setFeedback('auth-feedback', 'Data updated.', 'success');
   renderAuthMode();
 }
 
@@ -573,12 +747,12 @@ async function createFeed(event) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    setFeedback('feeds-feedback', 'Feed creado.', 'success');
+    setFeedback('feeds-feedback', 'Feed created.', 'success');
     getById('feed-create-form').reset();
     await loadFeeds();
     await loadOverview();
   } catch (error) {
-    setFeedback('feeds-feedback', `Error creando feed: ${error.message}`, 'error');
+    setFeedback('feeds-feedback', `Error creating feed: ${error.message}`, 'error');
   }
 }
 
@@ -604,12 +778,12 @@ async function createRule(event) {
       body: JSON.stringify(payload),
     });
 
-    setFeedback('rules-feedback', 'Regla creada.', 'success');
+    setFeedback('rules-feedback', 'Rule created.', 'success');
     getById('rule-create-form').reset();
     getById('rule-active').checked = true;
     await loadRules();
   } catch (error) {
-    setFeedback('rules-feedback', `Error creando regla: ${error.message}`, 'error');
+    setFeedback('rules-feedback', `Error creating rule: ${error.message}`, 'error');
   }
 }
 
@@ -632,14 +806,14 @@ async function uploadOpml(event) {
     });
 
     getById('opml-import-id').value = payload.data?.id || '';
-    setFeedback('opml-feedback', `Import creado: id=${payload.data?.id} status=${payload.data?.status}.`, 'success');
+    setFeedback('opml-feedback', `Import created: id=${payload.data?.id} status=${payload.data?.status}.`, 'success');
   } catch (error) {
     if (error instanceof ApiError && [404, 405, 501].includes(error.status)) {
       state.capabilities.opml = false;
-      setFeedback('opml-feedback', 'El backend no soporta OPML import en este entorno.', 'warn');
+      setFeedback('opml-feedback', 'This backend does not support OPML import in this environment.', 'warn');
       return;
     }
-    setFeedback('opml-feedback', `Error subiendo OPML: ${error.message}`, 'error');
+    setFeedback('opml-feedback', `Error uploading OPML: ${error.message}`, 'error');
   }
 }
 
@@ -648,9 +822,9 @@ async function confirmOpml() {
     await requireAuth();
     const importId = getOpmlImportId();
     const payload = await api(`/api/v1/opml/imports/${importId}/confirm`, { method: 'POST' });
-    setFeedback('opml-status-output', `Confirmación enviada: ${payload.data?.status || 'queued'}.`, 'success');
+    setFeedback('opml-status-output', `Confirmation sent: ${payload.data?.status || 'queued'}.`, 'success');
   } catch (error) {
-    setFeedback('opml-status-output', `Error confirmando OPML: ${error.message}`, 'error');
+    setFeedback('opml-status-output', `Error confirming OPML: ${error.message}`, 'error');
   }
 }
 
@@ -670,7 +844,7 @@ async function handleFeedsTableAction(event) {
     await requireAuth();
     if (action === 'check') {
       await api(`/api/v1/feeds/${feedId}/check-now`, { method: 'POST' });
-      setFeedback('feeds-feedback', `Feed ${feedId} encolado para check inmediato.`, 'success');
+      setFeedback('feeds-feedback', `Feed ${feedId} queued for an immediate check.`, 'success');
       return;
     }
 
@@ -680,7 +854,7 @@ async function handleFeedsTableAction(event) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ status: button.dataset.feedStatus }),
       });
-      setFeedback('feeds-feedback', `Feed ${feedId} actualizado.`, 'success');
+      setFeedback('feeds-feedback', `Feed ${feedId} updated.`, 'success');
       await loadFeeds();
       await loadOverview();
       return;
@@ -691,19 +865,19 @@ async function handleFeedsTableAction(event) {
         return;
       }
       await api(`/api/v1/feeds/${feedId}`, { method: 'DELETE' });
-      setFeedback('feeds-feedback', `Feed ${feedId} deshabilitado.`, 'success');
+      setFeedback('feeds-feedback', `Feed ${feedId} disabled.`, 'success');
       await loadFeeds();
       await loadOverview();
     }
   } catch (error) {
     if (error instanceof ApiError && [404, 405, 501].includes(error.status) && action === 'delete') {
       state.capabilities.feedDelete = false;
-      setFeedback('feeds-feedback', 'Delete/disable feed no soportado por este backend.', 'warn');
+      setFeedback('feeds-feedback', 'Delete/disable feed is not supported by this backend.', 'warn');
       await loadFeeds();
       return;
     }
 
-    setFeedback('feeds-feedback', `Error en acción de feed: ${error.message}`, 'error');
+    setFeedback('feeds-feedback', `Feed action error: ${error.message}`, 'error');
   }
 }
 
@@ -723,18 +897,18 @@ async function handleRulesTableAction(event) {
     await requireAuth();
     if (action === 'delete') {
       await api(`/api/v1/rules/${ruleId}`, { method: 'DELETE' });
-      setFeedback('rules-feedback', `Regla ${ruleId} deshabilitada.`, 'success');
+      setFeedback('rules-feedback', `Rule ${ruleId} disabled.`, 'success');
       await loadRules();
       await loadOverview();
     }
   } catch (error) {
     if (error instanceof ApiError && [404, 405, 501].includes(error.status) && action === 'delete') {
       state.capabilities.ruleDelete = false;
-      setFeedback('rules-feedback', 'Delete/disable rule no soportado por este backend.', 'warn');
+      setFeedback('rules-feedback', 'Delete/disable rule is not supported by this backend.', 'warn');
       await loadRules();
       return;
     }
-    setFeedback('rules-feedback', `Error en acción de regla: ${error.message}`, 'error');
+    setFeedback('rules-feedback', `Rule action error: ${error.message}`, 'error');
   }
 }
 
@@ -754,12 +928,12 @@ async function handleAlertsTableAction(event) {
     await requireAuth();
     if (action === 'send') {
       await api(`/api/v1/alerts/${alertId}/send`, { method: 'POST' });
-      setFeedback('alerts-feedback', `Alert ${alertId} reencolada para envío.`, 'success');
+      setFeedback('alerts-feedback', `Alert ${alertId} re-queued for delivery.`, 'success');
       await loadAlerts();
       await loadOverview();
     }
   } catch (error) {
-    setFeedback('alerts-feedback', `Error reenviando alert: ${error.message}`, 'error');
+    setFeedback('alerts-feedback', `Error resending alert: ${error.message}`, 'error');
   }
 }
 
@@ -781,13 +955,13 @@ async function loadSettings() {
     setFeedback(
       'settings-telegram-token-status',
       telegramBotTokenConfigured
-        ? 'Token por tenant configurado.'
-        : 'Token por tenant no configurado (se usa fallback global si existe).',
+        ? 'Tenant token configured.'
+        : 'Tenant token not configured (the global fallback is used when available).',
       telegramBotTokenConfigured ? 'success' : 'warn',
     );
-    setFeedback('settings-feedback', 'Configuración cargada correctamente.', 'info');
+    setFeedback('settings-feedback', 'Settings loaded successfully.', 'info');
   } catch (error) {
-    setFeedback('settings-feedback', `Error cargando settings: ${error.message}`, 'error');
+    setFeedback('settings-feedback', `Error loading settings: ${error.message}`, 'error');
   }
 }
 
@@ -823,10 +997,10 @@ async function saveSettings(event) {
     });
     getById('settings-telegram-bot-token').value = '';
     getById('settings-telegram-token-clear').checked = false;
-    setFeedback('settings-feedback', 'Configuración guardada con éxito.', 'success');
+    setFeedback('settings-feedback', 'Settings saved successfully.', 'success');
     await loadSettings();
   } catch (error) {
-    setFeedback('settings-feedback', `Error guardando settings: ${error.message}`, 'error');
+    setFeedback('settings-feedback', `Error saving settings: ${error.message}`, 'error');
   }
 }
 
@@ -850,10 +1024,10 @@ async function clearSettings() {
     getById('settings-telegram-token-clear').checked = false;
     getById('settings-telegram-chat-ids').value = '';
     getById('settings-telegram-mode').value = 'instant';
-    setFeedback('settings-telegram-token-status', 'Token por tenant no configurado.', 'warn');
-    setFeedback('settings-feedback', 'Canales limpiados para este tenant.', 'success');
+    setFeedback('settings-telegram-token-status', 'Tenant token not configured.', 'warn');
+    setFeedback('settings-feedback', 'Channels cleared for this tenant.', 'success');
   } catch (error) {
-    setFeedback('settings-feedback', `Error limpiando canales: ${error.message}`, 'error');
+    setFeedback('settings-feedback', `Error clearing channels: ${error.message}`, 'error');
   }
 }
 
@@ -896,7 +1070,7 @@ async function initClerk() {
 
 async function signInWithClerk() {
   if (!state.auth.clerkEnabled || !state.auth.clerkReady || !globalThis.Clerk) {
-    setFeedback('auth-feedback', 'Clerk no está disponible en este entorno.', 'warn');
+    setFeedback('auth-feedback', 'Clerk is not available in this environment.', 'warn');
     return;
   }
 
@@ -914,19 +1088,51 @@ async function signOutFromClerk() {
   await globalThis.Clerk.signOut();
   state.auth.clerkToken = '';
   renderAuthMode();
-  setFeedback('auth-feedback', 'Sesión Clerk cerrada.', 'info');
+  setFeedback('auth-feedback', 'Clerk session closed.', 'info');
+}
+
+/** Selects a tab and runs the side effect the tab owns. */
+function activateTab(tabId) {
+  switchTab(tabId);
+  if (tabId === 'settings') {
+    void loadSettings();
+  }
+}
+
+/** Arrow/Home/End navigation, the interaction `role="tab"` promises. */
+function handleTabKeydown(event) {
+  const key = event?.key;
+  const currentIndex = state.tabs.indexOf(state.activeTab);
+  const count = state.tabs.length;
+  let nextIndex = -1;
+
+  if (key === 'ArrowRight' || key === 'ArrowDown') {
+    nextIndex = (currentIndex + 1) % count;
+  } else if (key === 'ArrowLeft' || key === 'ArrowUp') {
+    nextIndex = (currentIndex - 1 + count) % count;
+  } else if (key === 'Home') {
+    nextIndex = 0;
+  } else if (key === 'End') {
+    nextIndex = count - 1;
+  } else {
+    return;
+  }
+
+  if (typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+
+  const nextTab = state.tabs[nextIndex];
+  activateTab(nextTab);
+  focusIfSupported(getById(`tab-btn-${nextTab}`));
 }
 
 function initTabs() {
-  getById('tab-btn-overview').addEventListener('click', () => switchTab('overview'));
-  getById('tab-btn-feeds').addEventListener('click', () => switchTab('feeds'));
-  getById('tab-btn-rules-alerts').addEventListener('click', () => switchTab('rules-alerts'));
-  getById('tab-btn-entries').addEventListener('click', () => switchTab('entries'));
-  getById('tab-btn-opml').addEventListener('click', () => switchTab('opml'));
-  getById('tab-btn-settings').addEventListener('click', () => {
-    switchTab('settings');
-    void loadSettings();
-  });
+  for (const tab of state.tabs) {
+    const button = getById(`tab-btn-${tab}`);
+    button.addEventListener('click', () => activateTab(tab));
+    button.addEventListener('keydown', (event) => handleTabKeydown(event));
+  }
 }
 
 function initEvents() {
@@ -1057,6 +1263,7 @@ function initEvents() {
 }
 
 function bootstrap() {
+  migrateLegacyApiKeyStorage();
   initTabs();
   initEvents();
   renderAuthMode();

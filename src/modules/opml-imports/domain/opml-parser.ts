@@ -30,7 +30,14 @@ function parseAttributes(tag: string): Record<string, string> {
   while (match) {
     const key = match[1];
     const value = match[3] ?? match[4] ?? '';
-    attributes[key] = decodeXmlEntities(value.trim());
+
+    // Group 1 is not optional in `attrRegex`, so a match always carries a key.
+    // Guarding rather than asserting keeps a malformed capture from writing an
+    // `undefined` key into the attribute map.
+    if (key !== undefined) {
+      attributes[key] = decodeXmlEntities(value.trim());
+    }
+
     match = attrRegex.exec(raw);
   }
 

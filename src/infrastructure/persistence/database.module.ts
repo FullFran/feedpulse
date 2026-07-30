@@ -1,8 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { Pool } from 'pg';
-
 import { AppConfigService } from '../../shared/config/app-config.service';
-
 import { DATABASE_POOL } from './database.constants';
 import { DatabaseService } from './database.service';
 import { ReadinessService } from './readiness.service';

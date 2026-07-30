@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
-
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { AppConfigService } from '../../../shared/config/app-config.service';
+import { assertSafePublicUrl, resolveAllowPrivateFeedHosts } from '../../../shared/http/url-safety';
 import { SettingsRepository, TenantTelegramBotTokenOperation } from '../settings.repository';
 import { TelegramDeliveryMode } from '../settings.types';
 import { TenantSecretsService } from '../tenant-secrets.service';
@@ -9,6 +10,7 @@ export class UpdateSettingsUseCase {
   constructor(
     private readonly settingsRepository: SettingsRepository,
     private readonly tenantSecretsService: TenantSecretsService,
+    @Inject(AppConfigService) private readonly appConfigService: AppConfigService,
   ) {}
 
   async execute(input: {
@@ -26,9 +28,26 @@ export class UpdateSettingsUseCase {
     telegramDeliveryMode: TelegramDeliveryMode;
     telegramBotTokenConfigured: boolean;
   }> {
+    // Write-time SSRF check: the webhook URL is fetched later by the notifier,
+    // which validates again at request time (defence in depth).
+    if (input.webhookNotifierUrl) {
+      try {
+        assertSafePublicUrl(input.webhookNotifierUrl, {
+          allowPrivateHosts: resolveAllowPrivateFeedHosts(this.appConfigService),
+        });
+      } catch {
+        throw new BadRequestException('unsafe_webhook_url');
+      }
+    }
+
     const tokenOperation = this.resolveTokenOperation(input);
     const telegramBotTokenEncrypted =
-      tokenOperation === 'set' ? this.tenantSecretsService.encryptTelegramBotToken(input.telegramBotToken as string) : null;
+      tokenOperation === 'set'
+        ? this.tenantSecretsService.encryptTelegramBotToken({
+            tenantId: input.tenantId,
+            token: input.telegramBotToken as string,
+          })
+        : null;
 
     const settings = await this.settingsRepository.upsertNotifierSettings({
       tenantId: input.tenantId,
@@ -49,7 +68,10 @@ export class UpdateSettingsUseCase {
     };
   }
 
-  private resolveTokenOperation(input: { telegramBotToken?: string | null; clearTelegramBotToken: boolean }): TenantTelegramBotTokenOperation {
+  private resolveTokenOperation(input: {
+    telegramBotToken?: string | null;
+    clearTelegramBotToken: boolean;
+  }): TenantTelegramBotTokenOperation {
     if (input.clearTelegramBotToken || input.telegramBotToken === null) {
       return 'clear';
     }

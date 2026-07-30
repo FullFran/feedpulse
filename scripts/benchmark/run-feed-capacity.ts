@@ -35,8 +35,10 @@ interface FixtureHealth {
   uniqueFeedsServed: number;
 }
 
-const apiBaseUrl = process.env.BENCHMARK_API_BASE_URL ?? `http://127.0.0.1:${process.env.BENCHMARK_API_HOST_PORT ?? '3400'}`;
-const fixturePublicBaseUrl = process.env.BENCHMARK_FIXTURE_PUBLIC_URL ?? `http://127.0.0.1:${process.env.BENCHMARK_MONITORING_PORT ?? '4110'}`;
+const apiBaseUrl =
+  process.env.BENCHMARK_API_BASE_URL ?? `http://127.0.0.1:${process.env.BENCHMARK_API_HOST_PORT ?? '3400'}`;
+const fixturePublicBaseUrl =
+  process.env.BENCHMARK_FIXTURE_PUBLIC_URL ?? `http://127.0.0.1:${process.env.BENCHMARK_MONITORING_PORT ?? '4110'}`;
 const fixtureInternalBaseUrl = process.env.BENCHMARK_FIXTURE_INTERNAL_URL ?? 'http://smoke-monitoring:4010';
 const artifactsRoot = process.env.BENCHMARK_ARTIFACTS_DIR ?? join(process.cwd(), 'artifacts', 'benchmark');
 const stageTargets = parseStageTargets(process.env.BENCHMARK_STAGES ?? '100');
@@ -112,7 +114,12 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return result.bodyJson as T;
 }
 
-async function poll<T>(label: string, fn: () => Promise<T>, timeoutMs = pollTimeoutMs, intervalMs = pollIntervalMs): Promise<T> {
+async function poll<T>(
+  label: string,
+  fn: () => Promise<T>,
+  timeoutMs = pollTimeoutMs,
+  intervalMs = pollIntervalMs,
+): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
 
@@ -172,6 +179,10 @@ async function readMetrics(): Promise<MetricSnapshot> {
     }
 
     const [name, rawValue] = line.trim().split(/\s+/, 2);
+    if (name === undefined || rawValue === undefined) {
+      continue;
+    }
+
     const value = Number.parseFloat(rawValue);
     if (Number.isFinite(value)) {
       values[name] = value;
@@ -263,7 +274,10 @@ async function readFixtureSample(path: 'captures' | 'requests'): Promise<unknown
   return requestJson(`${fixturePublicBaseUrl}/${path}?limit=${pageSampleSize}`);
 }
 
-async function runStage(targetFeeds: number, alreadySeeded: number): Promise<{ summary: Record<string, unknown>; seededFeeds: number }> {
+async function runStage(
+  targetFeeds: number,
+  alreadySeeded: number,
+): Promise<{ summary: Record<string, unknown>; seededFeeds: number }> {
   const stageDir = join(runArtifactsDir, `stage-${targetFeeds}`);
   await ensureDir(stageDir);
 

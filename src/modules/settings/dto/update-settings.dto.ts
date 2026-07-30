@@ -1,6 +1,5 @@
 import { Transform } from 'class-transformer';
 import { IsArray, IsBoolean, IsEmail, IsIn, IsOptional, IsString, IsUrl, Matches } from 'class-validator';
-
 import { TELEGRAM_DELIVERY_MODES, TelegramDeliveryMode } from '../settings.types';
 
 function normalizeOptionalUrl(value: unknown): string | null | undefined {
@@ -73,7 +72,7 @@ function parseTelegramChatIds(value: unknown): unknown {
   );
 }
 
-function normalizeDeliveryMode(value: unknown): TelegramDeliveryMode | unknown {
+function normalizeDeliveryMode(value: unknown): unknown {
   if (value === undefined || value === null) {
     return value;
   }
@@ -102,7 +101,7 @@ function normalizeOptionalString(value: unknown): string | null | undefined {
   return trimmed.length === 0 ? null : trimmed;
 }
 
-function normalizeBoolean(value: unknown): boolean | unknown {
+function normalizeBoolean(value: unknown): unknown {
   if (typeof value === 'boolean') {
     return value;
   }

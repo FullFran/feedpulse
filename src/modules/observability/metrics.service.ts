@@ -1,8 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import { Counter, Gauge, Histogram, collectDefaultMetrics } from 'prom-client';
-
-import { SHARED_METRICS_REGISTRY } from './metrics-registry';
+import { Counter, Gauge, Histogram } from 'prom-client';
+import { DatabaseService } from '../../infrastructure/persistence/database.service';
 import { FeedsRepository } from '../feeds/feeds.repository';
+import { SHARED_METRICS_REGISTRY } from './metrics-registry';
+
+/**
+ * Delivery channels the per-channel failure counter is labelled by.
+ *
+ * Closed on purpose: `channel` must never carry a tenant id, an alert id or a
+ * URL, or the counter's cardinality becomes unbounded.
+ */
+export type AlertDeliveryChannelLabel = 'webhook' | 'telegram' | 'email';
 
 @Injectable()
 export class MetricsService {
@@ -58,8 +66,28 @@ export class MetricsService {
     help: 'Total rate limit backoff events (Retry-After or exponential)',
     registers: [SHARED_METRICS_REGISTRY],
   });
+  // Before this existed, `ProcessAlertDeliveryUseCase` only string-joined the
+  // per-channel errors into the message it threw, so "webhooks have been failing
+  // for three days" was invisible to monitoring as long as another channel
+  // succeeded.
+  private readonly alertDeliveryChannelFailuresTotal = new Counter({
+    name: 'rss_alert_delivery_channel_failures_total',
+    help: 'Total per-channel alert delivery failures, including quota blocks',
+    labelNames: ['channel'] as const,
+    registers: [SHARED_METRICS_REGISTRY],
+  });
+  // The backlog counterpart to `rss_alerts_sent_total`: a counter only ever
+  // grows, so it cannot answer "how many alerts are stuck right now".
+  private readonly alertsUndelivered = new Gauge({
+    name: 'rss_alerts_undelivered',
+    help: 'Alerts whose delivery is still pending or has failed',
+    registers: [SHARED_METRICS_REGISTRY],
+  });
 
-  constructor(private readonly feedsRepository: FeedsRepository) {
+  constructor(
+    private readonly feedsRepository: FeedsRepository,
+    private readonly databaseService: DatabaseService,
+  ) {
     // Default metrics are collected once in metrics-registry.ts; do not re-collect here
   }
 
@@ -95,10 +123,28 @@ export class MetricsService {
     }
   }
 
+  incrementAlertDeliveryChannelFailure(channel: AlertDeliveryChannelLabel): void {
+    this.alertDeliveryChannelFailuresTotal.inc({ channel });
+  }
+
   async metrics(): Promise<string> {
     this.feedsActiveTotal.set(await this.feedsRepository.countByStatus('active'));
     this.feedsErrorTotal.set(await this.feedsRepository.countByStatus('error'));
+    this.alertsUndelivered.set(await this.countUndeliveredAlerts());
     return SHARED_METRICS_REGISTRY.metrics();
+  }
+
+  /**
+   * Deliberately NOT tenant-scoped: this is the operator's backlog, and adding a
+   * `tenant` label would make the series cardinality grow with the customer
+   * count. `health.controller.ts` already serves the tenant-scoped view.
+   */
+  private async countUndeliveredAlerts(): Promise<number> {
+    const result = await this.databaseService.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count FROM alerts WHERE delivery_status IN ('pending', 'failed')`,
+    );
+
+    return Number(result.rows[0]?.count ?? '0');
   }
 
   get contentType(): string {

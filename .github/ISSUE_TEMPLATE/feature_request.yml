@@ -1,0 +1,56 @@
+name: Feature request
+description: Propose a capability FeedPulse does not have yet.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that FeedPulse makes hard or impossible today? Describe the situation, not the solution.
+      placeholder: |
+        I monitor 400 feeds and cannot tell which ones have been failing for days
+        without querying the database directly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What you would like to see. An API shape, a config option or a screenshot sketch is all useful.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - REST API
+        - ingestion and rule matching
+        - alerting and notifications
+        - scheduling and job processing
+        - observability (metrics, logs, health)
+        - operator dashboard
+        - deployment and operations
+        - documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, and why they were not enough.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a pull request for this.
+          required: false

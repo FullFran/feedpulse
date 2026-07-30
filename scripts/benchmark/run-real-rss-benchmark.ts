@@ -34,6 +34,12 @@ interface FeedSeedRecord {
   source: string;
 }
 
+interface SeedError {
+  index: number;
+  source: string;
+  error: string;
+}
+
 interface ListEnvelopeMeta {
   total: number;
 }
@@ -49,27 +55,33 @@ interface Snapshot {
 // ── Configuration ─────────────────────────────────────────────────────────────
 
 const REAL_RSS_FEEDS = [
-  { source: 'google-blog',    url: 'https://blog.google/rss/',           pollIntervalSeconds: 3600 },
-  { source: 'hn-frontpage',   url: 'https://hnrss.org/frontpage',      pollIntervalSeconds: 1800 },
-  { source: 'techcrunch',     url: 'https://techcrunch.com/feed/',     pollIntervalSeconds: 3600 },
-  { source: 'bbc-news',      url: 'https://feeds.bbci.co.uk/news/rss.xml', pollIntervalSeconds: 1800 },
-  { source: 'arstechnica',   url: 'https://feeds.arstechnica.com/arstechnica/index', pollIntervalSeconds: 3600 },
-  { source: 'theverge',      url: 'https://www.theverge.com/rss/index.xml', pollIntervalSeconds: 3600 },
+  { source: 'google-blog', url: 'https://blog.google/rss/', pollIntervalSeconds: 3600 },
+  { source: 'hn-frontpage', url: 'https://hnrss.org/frontpage', pollIntervalSeconds: 1800 },
+  { source: 'techcrunch', url: 'https://techcrunch.com/feed/', pollIntervalSeconds: 3600 },
+  { source: 'bbc-news', url: 'https://feeds.bbci.co.uk/news/rss.xml', pollIntervalSeconds: 1800 },
+  { source: 'arstechnica', url: 'https://feeds.arstechnica.com/arstechnica/index', pollIntervalSeconds: 3600 },
+  { source: 'theverge', url: 'https://www.theverge.com/rss/index.xml', pollIntervalSeconds: 3600 },
 ];
 
-const apiBaseUrl         = process.env.BENCHMARK_API_BASE_URL        ?? `http://127.0.0.1:${process.env.BENCHMARK_API_HOST_PORT        ?? '3400'}`;
-const fixturePublicBaseUrl = process.env.BENCHMARK_FIXTURE_PUBLIC_URL ?? `http://127.0.0.1:${process.env.BENCHMARK_MONITORING_PORT    ?? '4110'}`;
-const artifactsRoot      = process.env.BENCHMARK_ARTIFACTS_DIR        ?? join(process.cwd(), 'artifacts', 'benchmark-real');
-const targetFeedCount    = parsePositiveInt(process.env.BENCHMARK_TARGET_FEEDS, 10000);
-const seedBatchSize      = parsePositiveInt(process.env.BENCHMARK_SEED_BATCH_SIZE, 50);
-const observeWindowMs    = parsePositiveInt(process.env.BENCHMARK_OBSERVE_WINDOW_MS, 300000); // 5 min default
+// Used only when a verified feed URL cannot be matched back to its entry in
+// REAL_RSS_FEEDS, which the verification pass makes unreachable in practice.
+const FALLBACK_POLL_INTERVAL_SECONDS = 3600;
+
+const apiBaseUrl =
+  process.env.BENCHMARK_API_BASE_URL ?? `http://127.0.0.1:${process.env.BENCHMARK_API_HOST_PORT ?? '3400'}`;
+const fixturePublicBaseUrl =
+  process.env.BENCHMARK_FIXTURE_PUBLIC_URL ?? `http://127.0.0.1:${process.env.BENCHMARK_MONITORING_PORT ?? '4110'}`;
+const artifactsRoot = process.env.BENCHMARK_ARTIFACTS_DIR ?? join(process.cwd(), 'artifacts', 'benchmark-real');
+const targetFeedCount = parsePositiveInt(process.env.BENCHMARK_TARGET_FEEDS, 10000);
+const seedBatchSize = parsePositiveInt(process.env.BENCHMARK_SEED_BATCH_SIZE, 50);
+const observeWindowMs = parsePositiveInt(process.env.BENCHMARK_OBSERVE_WINDOW_MS, 300000); // 5 min default
 const snapshotIntervalMs = parsePositiveInt(process.env.BENCHMARK_SNAPSHOT_INTERVAL_MS, 30000);
-const ruleKeyword        = process.env.BENCHMARK_RULE_KEYWORD         ?? 'AI';
+const ruleKeyword = process.env.BENCHMARK_RULE_KEYWORD ?? 'AI';
 // NOTE: The matching uses AND logic (every keyword must match).
 // Using a single keyword avoids requiring ALL keywords in every entry.
 // "AI" alone gives realistic match rates (~5-7% with real RSS content).
-const runId              = createRunId();
-const runArtifactsDir    = join(artifactsRoot, runId);
+const runId = createRunId();
+const runArtifactsDir = join(artifactsRoot, runId);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -100,7 +112,11 @@ async function request(url: string, init?: RequestInit): Promise<HttpResult> {
   const response = await fetch(url, init);
   const bodyText = await response.text();
   let bodyJson: unknown;
-  try { bodyJson = bodyText ? JSON.parse(bodyText) : undefined; } catch { bodyJson = undefined; }
+  try {
+    bodyJson = bodyText ? JSON.parse(bodyText) : undefined;
+  } catch {
+    bodyJson = undefined;
+  }
   return {
     url,
     status: response.status,
@@ -108,7 +124,7 @@ async function request(url: string, init?: RequestInit): Promise<HttpResult> {
     headers: Object.fromEntries((response.headers as any).entries?.() ?? []),
     bodyText,
     bodyJson,
-    // @ts-ignore — attach duration for internal use
+    // @ts-expect-error extra field attached for internal timing; not part of HttpResult
     _durationMs: Date.now() - startedAt,
   };
 }
@@ -125,7 +141,12 @@ async function poll<T>(label: string, fn: () => Promise<T>, timeoutMs = 120000, 
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {
-    try { return await fn(); } catch (error) { lastError = error; await delay(intervalMs); }
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      await delay(intervalMs);
+    }
   }
   throw new Error(`${label} timed out: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
 }
@@ -137,10 +158,15 @@ async function waitForReadiness(): Promise<void> {
   });
   // Fixture monitoring (webhook sink) may not be available in this benchmark — that's OK
   try {
-    await poll('fixture health', async () => {
-      const result = await request(`${fixturePublicBaseUrl}/health`);
-      if (result.status !== 200) throw new Error(`fixture health returned ${result.status}`);
-    }, 15000, 2000);
+    await poll(
+      'fixture health',
+      async () => {
+        const result = await request(`${fixturePublicBaseUrl}/health`);
+        if (result.status !== 200) throw new Error(`fixture health returned ${result.status}`);
+      },
+      15000,
+      2000,
+    );
   } catch {
     console.warn('  ⚠  Fixture monitoring not available — continuing without webhook sink health check');
   }
@@ -153,6 +179,7 @@ async function readMetrics(): Promise<Record<string, number>> {
   for (const line of result.bodyText.split('\n')) {
     if (!line || line.startsWith('#')) continue;
     const [name, rawValue] = line.trim().split(/\s+/, 2);
+    if (name === undefined || rawValue === undefined) continue;
     const value = Number.parseFloat(rawValue);
     if (Number.isFinite(value)) values[name] = value;
   }
@@ -192,7 +219,7 @@ async function ensureRule(): Promise<{ id: number; name: string }> {
   return response.data;
 }
 
-async function createFeed(index: number, feedDef: typeof REAL_RSS_FEEDS[0]): Promise<FeedSeedRecord> {
+async function createFeed(index: number, feedDef: (typeof REAL_RSS_FEEDS)[0]): Promise<FeedSeedRecord> {
   // Append instance param so the API accepts duplicate URLs (the DB enforces URL uniqueness,
   // but we want 10k distinct feed records — we use a URL param as a workaround)
   const url = `${feedDef.url}${feedDef.url.includes('?') ? '&' : '?'}instance=${index}`;
@@ -219,16 +246,6 @@ async function createFeed(index: number, feedDef: typeof REAL_RSS_FEEDS[0]): Pro
   });
 
   return { index, id: response.data.id, url, source: feedDef.source };
-}
-
-async function runInBatches<T>(items: T[], worker: (value: T, idx: number) => Promise<T>): Promise<T[]> {
-  const results: T[] = [];
-  for (let i = 0; i < items.length; i += seedBatchSize) {
-    const batch = items.slice(i, i + seedBatchSize);
-    const batchResults = await Promise.all(batch.map((item, bi) => worker(item, i + bi)));
-    results.push(...batchResults);
-  }
-  return results;
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
@@ -292,23 +309,38 @@ async function main(): Promise<void> {
   await writeArtifact(runArtifactsDir, 'rule.json', rule);
 
   // ── Phase 3: Seed Feeds ─────────────────────────────────────────────────────
-  console.log(`\n🌱 Phase 3 — Seeding ${targetFeedCount.toLocaleString()} feeds (round-robin from ${workingFeeds.length} sources)...`);
+  console.log(
+    `\n🌱 Phase 3 — Seeding ${targetFeedCount.toLocaleString()} feeds (round-robin from ${workingFeeds.length} sources)...`,
+  );
 
   // Build a pool of feed definitions (round-robin to spread across sources)
   // Map verification results back to the seed definition shape with pollIntervalSeconds
   const seedPoolDefs = workingFeeds.map((r) => {
-    const orig = REAL_RSS_FEEDS.find((f) => f.url === r.url) ?? REAL_RSS_FEEDS[0];
-    return { source: r.source, url: r.url, pollIntervalSeconds: orig.pollIntervalSeconds };
+    const orig = REAL_RSS_FEEDS.find((f) => f.url === r.url);
+    return {
+      source: r.source,
+      url: r.url,
+      pollIntervalSeconds: orig?.pollIntervalSeconds ?? FALLBACK_POLL_INTERVAL_SECONDS,
+    };
   });
-  const feedPool: typeof REAL_RSS_FEEDS[0][] = [];
+
+  if (seedPoolDefs.length === 0) {
+    throw new Error('no working RSS sources available to seed from');
+  }
+
+  const feedPool: (typeof REAL_RSS_FEEDS)[0][] = [];
   for (let i = 0; i < targetFeedCount; i++) {
-    feedPool.push(seedPoolDefs[i % seedPoolDefs.length]);
+    const def = seedPoolDefs[i % seedPoolDefs.length];
+    if (def === undefined) {
+      continue;
+    }
+    feedPool.push(def);
   }
 
   const startSeed = Date.now();
   let seededCount = 0;
   let duplicateErrors = 0;
-  const seedErrors: Array<{ index: number; source: string; error: string }> = [];
+  const seedErrors: SeedError[] = [];
   const seededFeeds: FeedSeedRecord[] = [];
 
   // Batch seeding with progress reporting
@@ -324,23 +356,27 @@ async function main(): Promise<void> {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           // Handle duplicate URL errors gracefully
+          // `id: -1` is the sentinel for "not seeded"; the filter below drops
+          // these, so no extra marker property is needed to tell them apart.
           if (msg.includes('duplicate') || msg.includes('unique') || msg.includes('23505')) {
             duplicateErrors++;
-            return { index: idx, id: -1, url: def.url, source: def.source, _dup: true } as any;
+            return { index: idx, id: -1, url: def.url, source: def.source };
           }
           seedErrors.push({ index: idx, source: def.source, error: msg });
-          return { index: idx, id: -1, url: def.url, source: def.source, _error: true } as any;
+          return { index: idx, id: -1, url: def.url, source: def.source };
         }
       }),
     );
 
-    const batchSuccesses = results.filter((r: any) => r.id > 0);
+    const batchSuccesses = results.filter((r) => r.id > 0);
     seededFeeds.push(...batchSuccesses);
     seededCount += batchSuccesses.length;
     const progress = Math.min(100, Math.round(((i + batch.length) / feedPool.length) * 100));
     const seedDuration = Date.now() - startSeed;
     const rate = seededCount > 0 ? Math.round(seededCount / (seedDuration / 1000)) : 0;
-    process.stdout.write(`\r  Progress: ${progress}% (${seededCount.toLocaleString()} seeded, ${duplicateErrors} duplicates, ${seedErrors.length} errors) — ${rate} feeds/sec   `);
+    process.stdout.write(
+      `\r  Progress: ${progress}% (${seededCount.toLocaleString()} seeded, ${duplicateErrors} duplicates, ${seedErrors.length} errors) — ${rate} feeds/sec   `,
+    );
   }
 
   console.log('\n');
@@ -369,7 +405,6 @@ async function main(): Promise<void> {
 
   const startObserve = Date.now();
   const snapshots: Snapshot[] = [];
-  let snapshotCount = 0;
 
   const initialCounts = await readCounts();
   const initialMetrics = await readMetrics();
@@ -380,7 +415,9 @@ async function main(): Promise<void> {
     metrics: initialMetrics,
   };
   snapshots.push(initialSnapshot);
-  console.log(`  [T+0s]  Initial — feeds: ${initialCounts.feeds}, entries: ${initialCounts.entries}, alerts: ${initialCounts.alerts}`);
+  console.log(
+    `  [T+0s]  Initial — feeds: ${initialCounts.feeds}, entries: ${initialCounts.entries}, alerts: ${initialCounts.alerts}`,
+  );
 
   while (Date.now() - startObserve < observeWindowMs) {
     await delay(snapshotIntervalMs);
@@ -394,7 +431,6 @@ async function main(): Promise<void> {
       metrics,
     };
     snapshots.push(snapshot);
-    snapshotCount++;
 
     const elapsedMin = (elapsed / 1000 / 60).toFixed(1);
     const newFeeds = counts.feeds - initialCounts.feeds;
@@ -411,46 +447,42 @@ async function main(): Promise<void> {
   console.log('\n\n');
 
   // ── Phase 5: Compute Metrics ────────────────────────────────────────────────
-  const finalSnapshot = snapshots[snapshots.length - 1];
+  // `snapshots` is seeded with `initialSnapshot` before the observation loop, so
+  // the fallback is unreachable; it exists so the last-element read is total.
+  const finalSnapshot = snapshots[snapshots.length - 1] ?? initialSnapshot;
   const totalElapsedMin = (finalSnapshot.elapsedMs / 1000 / 60).toFixed(1);
 
-  const finalFeeds     = finalSnapshot.counts.feeds     - initialCounts.feeds;
-  const finalEntries   = finalSnapshot.counts.entries   - initialCounts.entries;
-  const finalAlerts    = finalSnapshot.counts.alerts    - initialCounts.alerts;
-  const finalSent      = finalSnapshot.counts.sentAlerts - initialCounts.sentAlerts;
+  const finalFeeds = finalSnapshot.counts.feeds - initialCounts.feeds;
+  const finalEntries = finalSnapshot.counts.entries - initialCounts.entries;
+  const finalAlerts = finalSnapshot.counts.alerts - initialCounts.alerts;
+  const finalSent = finalSnapshot.counts.sentAlerts - initialCounts.sentAlerts;
 
   const avgFetchDuration = computeAvg(snapshots, 'rss_fetch_duration_seconds_sum', 'rss_fetch_duration_seconds_count');
-  const totalFetchErrors = (finalSnapshot.metrics['rss_fetch_errors_total'] ?? 0) - (initialMetrics['rss_fetch_errors_total'] ?? 0);
-  const totalFetches    = (finalSnapshot.metrics['rss_fetch_duration_seconds_count'] ?? 0) - (initialMetrics['rss_fetch_duration_seconds_count'] ?? 0);
+  const totalFetchErrors =
+    (finalSnapshot.metrics['rss_fetch_errors_total'] ?? 0) - (initialMetrics['rss_fetch_errors_total'] ?? 0);
+  const totalFetches =
+    (finalSnapshot.metrics['rss_fetch_duration_seconds_count'] ?? 0) -
+    (initialMetrics['rss_fetch_duration_seconds_count'] ?? 0);
 
-  const dedupRate = totalFetches > 0 && finalEntries > 0
-    ? ((totalFetches - finalEntries) / totalFetches * 100).toFixed(1)
-    : '0';
+  const dedupRate =
+    totalFetches > 0 && finalEntries > 0 ? (((totalFetches - finalEntries) / totalFetches) * 100).toFixed(1) : '0';
 
-  const alertRate = finalEntries > 0
-    ? (finalAlerts / finalEntries * 100).toFixed(2)
-    : '0';
+  const alertRate = finalEntries > 0 ? ((finalAlerts / finalEntries) * 100).toFixed(2) : '0';
 
   const throughput = {
-    feedsPerMin:  finalFeeds   > 0 ? (finalFeeds   / (finalSnapshot.elapsedMs / 1000 / 60)).toFixed(2) : '0',
+    feedsPerMin: finalFeeds > 0 ? (finalFeeds / (finalSnapshot.elapsedMs / 1000 / 60)).toFixed(2) : '0',
     entriesPerMin: finalEntries > 0 ? (finalEntries / (finalSnapshot.elapsedMs / 1000 / 60)).toFixed(2) : '0',
-    alertsPerMin: finalAlerts  > 0 ? (finalAlerts  / (finalSnapshot.elapsedMs / 1000 / 60)).toFixed(2) : '0',
+    alertsPerMin: finalAlerts > 0 ? (finalAlerts / (finalSnapshot.elapsedMs / 1000 / 60)).toFixed(2) : '0',
   };
-
-  // Fetch latency distribution
-  const fetchDurations = snapshots
-    .flatMap((s) => Object.entries(s.metrics))
-    .filter(([k]) => k === 'rss_fetch_duration_seconds_sum')
-    .map(([, v]) => v as number);
 
   // Get latency samples from fetch_logs via API (if available)
   const latencyStats = await computeLatencyStats(apiBaseUrl, snapshots.length);
 
   // Compare with fixture benchmark expectations
   const fixtureBaseline = {
-    coldStart100:  { totalMs: 2166, msPerFeed: 21.66 },
-    coldStart1k:   { totalMs: 53526, msPerFeed: 53.53 },
-    coldStart10k:  { totalMs: 57485, msPerFeed: 5.75 },
+    coldStart100: { totalMs: 2166, msPerFeed: 21.66 },
+    coldStart1k: { totalMs: 53526, msPerFeed: 53.53 },
+    coldStart10k: { totalMs: 57485, msPerFeed: 5.75 },
     warmIncremental10k: { msPerFeed: 5.52 },
     steadyState30k: { msPerFeed: 0.26 },
   };
@@ -476,7 +508,9 @@ async function main(): Promise<void> {
     // Feed verification
     feedVerification: {
       workingSources: workingFeeds.map((f) => ({ source: f.source, url: f.url, avgLatencyMs: f.latencyMs })),
-      blockedSources: feedVerificationResults.filter((r) => !r.accessible).map((r) => ({ source: r.source, url: r.url, status: r.status })),
+      blockedSources: feedVerificationResults
+        .filter((r) => !r.accessible)
+        .map((r) => ({ source: r.source, url: r.url, status: r.status })),
     },
 
     // Seed results
@@ -508,10 +542,10 @@ async function main(): Promise<void> {
 
     // Fixture benchmark comparison
     fixtureComparison: {
-      fixture100Feeds:  fixtureBaseline.coldStart100,
-      fixture1kFeeds:   fixtureBaseline.coldStart1k,
-      fixture10kFeeds:  fixtureBaseline.coldStart10k,
-      fixtureWarm10k:   fixtureBaseline.warmIncremental10k,
+      fixture100Feeds: fixtureBaseline.coldStart100,
+      fixture1kFeeds: fixtureBaseline.coldStart1k,
+      fixture10kFeeds: fixtureBaseline.coldStart10k,
+      fixtureWarm10k: fixtureBaseline.warmIncremental10k,
       fixtureSteady30k: fixtureBaseline.steadyState30k,
       realObservation: {
         seededFeeds: seededCount,
@@ -593,7 +627,9 @@ async function main(): Promise<void> {
   console.log('');
   console.log('  ── Latency (real RSS sources) ────────────────────────────');
   for (const ls of latencyStats.topSources) {
-    console.log(`    ${ls.source.padEnd(15)} avg=${ls.avgMs.toFixed(0).padStart(5)}ms  min=${ls.minMs}ms  max=${ls.maxMs}ms  p95=${ls.p95Ms.toFixed(0)}ms`);
+    console.log(
+      `    ${ls.source.padEnd(15)} avg=${ls.avgMs.toFixed(0).padStart(5)}ms  min=${ls.minMs}ms  max=${ls.maxMs}ms  p95=${ls.p95Ms.toFixed(0)}ms`,
+    );
   }
   console.log('');
   console.log('  ── Production Readiness ───────────────────────────────────');
@@ -623,10 +659,14 @@ function computeAvg(snapshots: Snapshot[], sumKey: string, countKey: string): nu
 async function computeLatencyStats(
   apiBaseUrl: string,
   _limit: number,
-): Promise<{ overallAvgMs: number; bySource: Record<string, number[]>; topSources: Array<{ source: string; avgMs: number; minMs: number; maxMs: number; p95Ms: number }> }> {
+): Promise<{
+  overallAvgMs: number;
+  bySource: Record<string, number[]>;
+  topSources: Array<{ source: string; avgMs: number; minMs: number; maxMs: number; p95Ms: number }>;
+}> {
   // Pull recent fetch_logs from the API to get real latency data
   try {
-    const resp = await requestJson<{ data: any[] }>(`${apiBaseUrl}/api/v1/feeds?page=1&page_size=5`);
+    await requestJson<{ data: unknown[] }>(`${apiBaseUrl}/api/v1/feeds?page=1&page_size=5`);
     // We can't easily get per-source latency from the API without a dedicated endpoint.
     // Instead, use our own live curl measurements
   } catch {
@@ -635,12 +675,12 @@ async function computeLatencyStats(
 
   // Do live latency sampling for honest reporting
   const realSources = [
-    { source: 'google-blog',    url: 'https://blog.google/rss/' },
-    { source: 'hn-frontpage',   url: 'https://hnrss.org/frontpage' },
-    { source: 'techcrunch',     url: 'https://techcrunch.com/feed/' },
-    { source: 'bbc-news',       url: 'https://feeds.bbci.co.uk/news/rss.xml' },
-    { source: 'arstechnica',    url: 'https://feeds.arstechnica.com/arstechnica/index' },
-    { source: 'theverge',       url: 'https://www.theverge.com/rss/index.xml' },
+    { source: 'google-blog', url: 'https://blog.google/rss/' },
+    { source: 'hn-frontpage', url: 'https://hnrss.org/frontpage' },
+    { source: 'techcrunch', url: 'https://techcrunch.com/feed/' },
+    { source: 'bbc-news', url: 'https://feeds.bbci.co.uk/news/rss.xml' },
+    { source: 'arstechnica', url: 'https://feeds.arstechnica.com/arstechnica/index' },
+    { source: 'theverge', url: 'https://www.theverge.com/rss/index.xml' },
   ];
 
   const bySource: Record<string, number[]> = {};
@@ -694,16 +734,24 @@ function assessProductionReadiness(input: {
   const observeMin = input.observeWindowMs / 1000 / 60;
 
   // Estimate how long a full 10k cycle would take
-  const estimatedCycleMin = input.entriesCreated > 0
-    ? (input.seededFeeds.length / (input.entriesCreated / observeMin))
-    : Infinity;
+  const estimatedCycleMin =
+    input.entriesCreated > 0 ? input.seededFeeds.length / (input.entriesCreated / observeMin) : Infinity;
 
   if (estimatedCycleMin < 60) {
-    notes.push({ type: 'success', message: `Estimated full 10k cycle: ${estimatedCycleMin.toFixed(0)} min — viable for production` });
+    notes.push({
+      type: 'success',
+      message: `Estimated full 10k cycle: ${estimatedCycleMin.toFixed(0)} min — viable for production`,
+    });
   } else if (estimatedCycleMin < 240) {
-    notes.push({ type: 'warning', message: `Estimated full 10k cycle: ${estimatedCycleMin.toFixed(0)} min — acceptable with scheduling tiering` });
+    notes.push({
+      type: 'warning',
+      message: `Estimated full 10k cycle: ${estimatedCycleMin.toFixed(0)} min — acceptable with scheduling tiering`,
+    });
   } else {
-    notes.push({ type: 'danger', message: `Estimated full 10k cycle: ${(estimatedCycleMin / 60).toFixed(1)} hours — too slow for production` });
+    notes.push({
+      type: 'danger',
+      message: `Estimated full 10k cycle: ${(estimatedCycleMin / 60).toFixed(1)} hours — too slow for production`,
+    });
   }
 
   const errorRate = input.totalFetches > 0 ? input.totalFetchErrors / input.totalFetches : 0;
@@ -712,13 +760,19 @@ function assessProductionReadiness(input: {
   } else if (errorRate < 0.05) {
     notes.push({ type: 'warning', message: `Fetch error rate: ${(errorRate * 100).toFixed(2)}% — acceptable` });
   } else {
-    notes.push({ type: 'danger', message: `Fetch error rate: ${(errorRate * 100).toFixed(2)}% — too high for production` });
+    notes.push({
+      type: 'danger',
+      message: `Fetch error rate: ${(errorRate * 100).toFixed(2)}% — too high for production`,
+    });
   }
 
   if (input.alertsCreated > 0) {
     notes.push({ type: 'success', message: `Keyword matching active: ${input.alertsCreated} alerts generated` });
   } else {
-    notes.push({ type: 'warning', message: 'No alerts generated — keyword matching may need tuning or feeds lack matching content' });
+    notes.push({
+      type: 'warning',
+      message: 'No alerts generated — keyword matching may need tuning or feeds lack matching content',
+    });
   }
 
   notes.push({ type: 'info', message: `Only ${input.workingFeeds} RSS sources available; OpenAI blocked (403)` });
@@ -732,14 +786,14 @@ function assessProductionReadiness(input: {
     verdict: hasDanger
       ? 'System would struggle at 10k real feeds — bottlenecks visible in real-world conditions'
       : hasWarning
-      ? 'System viable but requires tuning for 10k real feeds — network latency is the dominant factor'
-      : 'System handles 10k real feeds well — real-world conditions do not significantly degrade performance',
+        ? 'System viable but requires tuning for 10k real feeds — network latency is the dominant factor'
+        : 'System handles 10k real feeds well — real-world conditions do not significantly degrade performance',
     notes,
   };
 }
 
 function generateFindings(input: {
-  feedErrors: any[];
+  feedErrors: SeedError[];
   fetchErrors: number;
   dedupRate: number;
   alertRate: number;
@@ -754,19 +808,27 @@ function generateFindings(input: {
     findings.push(`${input.feedErrors.length} feed seeding errors — likely URL uniqueness constraints`);
   }
 
-  findings.push(`Real RSS latency avg: ${input.latencyStats.overallAvgMs.toFixed(0)}ms vs fixture's sub-millisecond — this is the dominant real-world overhead`);
+  findings.push(
+    `Real RSS latency avg: ${input.latencyStats.overallAvgMs.toFixed(0)}ms vs fixture's sub-millisecond — this is the dominant real-world overhead`,
+  );
 
   if (input.dedupRate > 50) {
     findings.push(`High deduplication rate (${input.dedupRate}%) on re-fetches — real RSS feeds change infrequently`);
   }
 
   if (input.alertRate < 1) {
-    findings.push(`Low keyword match rate (${input.alertRate}%) — real content distribution differs from synthetic feeds`);
+    findings.push(
+      `Low keyword match rate (${input.alertRate}%) — real content distribution differs from synthetic feeds`,
+    );
   }
 
-  findings.push(`Network latency variance across ${input.workingFeeds} sources: ${input.latencyStats.overallAvgMs.toFixed(0)}ms average — external servers are the primary bottleneck`);
+  findings.push(
+    `Network latency variance across ${input.workingFeeds} sources: ${input.latencyStats.overallAvgMs.toFixed(0)}ms average — external servers are the primary bottleneck`,
+  );
 
-  findings.push('Bottleneck shift: fixture benchmark shows CPU/DB as bottleneck; real RSS shows network I/O as the dominant factor');
+  findings.push(
+    'Bottleneck shift: fixture benchmark shows CPU/DB as bottleneck; real RSS shows network I/O as the dominant factor',
+  );
 
   return findings;
 }

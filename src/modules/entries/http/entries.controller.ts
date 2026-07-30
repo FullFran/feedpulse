@@ -1,12 +1,10 @@
 import { Controller, Get, Query, Req } from '@nestjs/common';
-import { Request } from 'express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-
+import { Request } from 'express';
 import { paginatedResponse } from '../../../shared/http/response';
 import { ApiEnvelopeResponse, ApiStandardErrorResponses } from '../../../shared/http/swagger';
 import { EntryModel } from '../../../shared/http/swagger.models';
 import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context';
-
 import { ListEntriesUseCase } from '../application/list-entries.use-case';
 import { ListEntriesQueryDto } from '../dto/list-entries.query';
 
@@ -17,7 +15,12 @@ export class EntriesController {
 
   @Get()
   @ApiOperation({ summary: 'List ingested feed entries with feed and text filters.' })
-  @ApiEnvelopeResponse(EntryModel, { status: 200, description: 'Entry list returned successfully.', isArray: true, paginated: true })
+  @ApiEnvelopeResponse(EntryModel, {
+    status: 200,
+    description: 'Entry list returned successfully.',
+    isArray: true,
+    paginated: true,
+  })
   @ApiStandardErrorResponses()
   async list(@Req() request: Request, @Query() query: ListEntriesQueryDto) {
     const tenantId = resolveTenantIdFromRequest(request);

@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-
 import { FeedsRepository } from '../feeds.repository';
 
 @Injectable()
 export class UpdateFeedUseCase {
   constructor(private readonly feedsRepository: FeedsRepository) {}
 
-  async execute(input: { tenantId: string; id: number; status?: 'active' | 'paused' | 'error'; pollIntervalSeconds?: number }) {
+  async execute(input: {
+    tenantId: string;
+    id: number;
+    status?: 'active' | 'paused' | 'error';
+    pollIntervalSeconds?: number;
+  }) {
     const feed = await this.feedsRepository.update(input);
 
     if (!feed) {

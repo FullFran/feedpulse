@@ -1,4 +1,10 @@
-import { buildFixtureStats, createRssDocument, feedKeyFromPath, normalizeFeedKey, paginate } from '../scripts/smoke/mock-monitoring-fixture';
+import {
+  buildFixtureStats,
+  createRssDocument,
+  feedKeyFromPath,
+  normalizeFeedKey,
+  paginate,
+} from '../scripts/smoke/mock-monitoring-fixture';
 
 describe('mock monitoring fixture helpers', () => {
   it('builds deterministic RSS for feed-specific paths', () => {
@@ -12,10 +18,24 @@ describe('mock monitoring fixture helpers', () => {
 
   it('maps fixture paths and aggregates compact stats', () => {
     const stats = buildFixtureStats(
-      [{ method: 'POST', path: '/webhook', headers: {}, rawBody: '{}', parsedBody: {}, timestamp: '2026-03-21T00:00:00.000Z' }],
+      [
+        {
+          method: 'POST',
+          path: '/webhook',
+          headers: {},
+          rawBody: '{}',
+          parsedBody: {},
+          timestamp: '2026-03-21T00:00:00.000Z',
+        },
+      ],
       [
         { method: 'GET', path: '/feeds/feed-00001/rss.xml', statusCode: 200, timestamp: '2026-03-21T00:00:00.000Z' },
-        { method: 'GET', path: '/feeds/feed-00001/rss.xml?probe=1', statusCode: 200, timestamp: '2026-03-21T00:00:01.000Z' },
+        {
+          method: 'GET',
+          path: '/feeds/feed-00001/rss.xml?probe=1',
+          statusCode: 200,
+          timestamp: '2026-03-21T00:00:01.000Z',
+        },
         { method: 'GET', path: '/rss.xml', statusCode: 200, timestamp: '2026-03-21T00:00:02.000Z' },
         { method: 'POST', path: '/webhook', statusCode: 204, timestamp: '2026-03-21T00:00:03.000Z' },
       ],

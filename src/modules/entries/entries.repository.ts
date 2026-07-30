@@ -1,15 +1,8 @@
 import { Injectable } from '@nestjs/common';
-
 import { DatabaseService } from '../../infrastructure/persistence/database.service';
+import { normalizeSearchText } from '../../shared/text/normalize-search-text';
 
 type QueryExecutor = Pick<DatabaseService, 'query'>;
-
-function normalizeSearchText(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
-}
 
 export interface Entry {
   id: string;
@@ -87,24 +80,18 @@ export class EntriesRepository {
     const created: Entry[] = [];
 
     for (const entry of entries) {
+      // `normalized_search_document` is a STORED GENERATED column since
+      // migration 0016, so Postgres derives it from title/content with the same
+      // algorithm as normalizeSearchText(). It must not appear in the column
+      // list: generated columns cannot be written to.
       const result = await executor.query<EntryRow>(
         `
-          INSERT INTO entries (tenant_id, feed_id, title, link, guid, content, content_hash, published_at, normalized_search_document)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, LOWER($9))
+          INSERT INTO entries (tenant_id, feed_id, title, link, guid, content, content_hash, published_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
           ON CONFLICT DO NOTHING
           RETURNING id, feed_id, title, link, guid, content, content_hash, published_at, fetched_at
         `,
-        [
-          tenantId,
-          feedId,
-          entry.title,
-          entry.link,
-          entry.guid,
-          entry.content,
-          entry.contentHash,
-          entry.publishedAt,
-          normalizeSearchText(`${entry.title ?? ''} ${entry.content ?? ''}`),
-        ],
+        [tenantId, feedId, entry.title, entry.link, entry.guid, entry.content, entry.contentHash, entry.publishedAt],
       );
 
       if (result.rows[0]) {
@@ -163,10 +150,17 @@ export class EntriesRepository {
     };
   }
 
-  async listForFilterSearch(limit: number, tenantId?: string): Promise<EntryFilterCandidate[]> {
+  /**
+   * Candidate entries for offline rule/filter evaluation.
+   *
+   * `tenantId` is REQUIRED. The previous overload returned the newest `limit` entries across
+   * the whole installation when the argument was omitted, so a single forgotten parameter
+   * leaked article titles and bodies from every other tenant. There is no worker counterpart:
+   * nothing evaluates filters across tenants.
+   */
+  async listForFilterSearch(limit: number, tenantId: string): Promise<EntryFilterCandidate[]> {
     const cappedLimit = Math.max(1, Math.min(limit, 5000));
-    const result = tenantId
-      ? await this.databaseService.query<EntryFilterRow>(
+    const result = await this.databaseService.query<EntryFilterRow>(
       `
         SELECT id, tenant_id, feed_id, title, content, published_at
         FROM entries
@@ -175,15 +169,6 @@ export class EntriesRepository {
         LIMIT $1
       `,
       [cappedLimit, tenantId],
-    )
-      : await this.databaseService.query<EntryFilterRow>(
-      `
-        SELECT id, tenant_id, feed_id, title, content, published_at
-        FROM entries
-        ORDER BY published_at DESC NULLS LAST, id DESC
-        LIMIT $1
-      `,
-      [cappedLimit],
     );
 
     return result.rows.map((row) => ({

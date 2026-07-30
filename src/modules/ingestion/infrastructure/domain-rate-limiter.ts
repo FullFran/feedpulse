@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { URL } from 'node:url';
-
 import { MetricsService } from '../../observability/metrics.service';
 
 export interface DomainRateLimiterOptions {
@@ -98,10 +97,7 @@ export class DomainRateLimiter {
     if (backoffMs === 0 && isRetry) {
       const currentBackoff = this.backoffUntil.get(domain) ?? Date.now();
       const previousBackoffMs = Math.max(0, currentBackoff - Date.now());
-      const newBackoffMs = Math.min(
-        this.maxBackoffMs,
-        Math.max(this.baseBackoffMs, previousBackoffMs * 2),
-      );
+      const newBackoffMs = Math.min(this.maxBackoffMs, Math.max(this.baseBackoffMs, previousBackoffMs * 2));
       backoffMs = newBackoffMs;
     }
 

@@ -1,0 +1,145 @@
+name: Nightly
+
+# Everything too slow or too expensive to run on a pull request.
+#
+# `smoke.yml` still runs on every push to `main`, so a stack-level regression is
+# caught within hours. This workflow covers the other axis: does the suite hold
+# on the next Node major, and does the ingestion pipeline still scale.
+
+on:
+  schedule:
+    # 03:17 UTC daily. Off the hour on purpose - the top of the hour is the
+    # busiest slot on GitHub's shared schedulers and runs get delayed there.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      benchmark_stages:
+        description: "Comma-separated feed counts for the capacity benchmark"
+        required: false
+        default: "100,1000"
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}
+  # Never cancel a nightly midway: a killed benchmark leaves a stack running.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-tests:
+    name: Tests on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    # The forward-looking entry is advisory. A Node major that is not yet on the
+    # runner images, or a transitive dependency that has not caught up with it,
+    # must not turn the nightly red for a runtime nothing ships on.
+    continue-on-error: ${{ matrix.experimental }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The version pinned in `.nvmrc` and used by the runtime image.
+          - node: "24"
+            experimental: false
+          # The next major, run as an early-warning signal before the pin moves.
+          - node: "26"
+            experimental: true
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: feedpulse_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d feedpulse_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/feedpulse_test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  benchmark:
+    name: Feed capacity benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      COMPOSE_BAKE: "true"
+      BENCHMARK_STAGES: ${{ inputs.benchmark_stages || '100,1000' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create .env placeholder for compose
+        # See the identical step in `smoke.yml`: `docker-compose.yml` declares
+        # `env_file: - .env` and `.env` is gitignored.
+        run: touch .env
+
+      - name: Start benchmark stack
+        run: npm run benchmark:stack:up
+
+      - name: Run capacity stages
+        run: npm run benchmark:run
+
+      - name: Capture docker diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p artifacts/benchmark
+          docker compose -p rss-monitor-benchmark -f docker-compose.yml -f docker-compose.smoke.yml ps > artifacts/benchmark/compose-ps.txt
+          docker compose -p rss-monitor-benchmark -f docker-compose.yml -f docker-compose.smoke.yml logs --no-color > artifacts/benchmark/compose.log
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-artifacts
+          path: artifacts/benchmark
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Tear down benchmark stack
+        if: always()
+        run: npm run benchmark:stack:down

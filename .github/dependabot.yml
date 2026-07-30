@@ -1,0 +1,76 @@
+version: 2
+
+# Dependabot is the ONLY dependency automation in this repository. Do not add a
+# Renovate configuration alongside it: two bots racing on the same lockfile
+# produce conflicting pull requests and a permanently dirty `package-lock.json`.
+
+updates:
+  # Node.js dependencies.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    # Deliberately low: a public repository drowns in noise long before the
+    # maintainer notices the one update that mattered.
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      # The NestJS packages are released in lockstep. Ungrouped, this is six
+      # pull requests a week that must all be merged together anyway.
+      nestjs:
+        patterns:
+          - "@nestjs/*"
+      # Type definitions carry no runtime risk; batching them keeps the review
+      # budget for updates that can actually break production.
+      types:
+        patterns:
+          - "@types/*"
+      test-tooling:
+        patterns:
+          - "jest"
+          - "ts-jest"
+          - "@types/jest"
+          - "supertest"
+          - "@types/supertest"
+          - "pg-mem"
+
+  # GitHub Actions pinned in `.github/workflows/*.yml`.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Base images in `Dockerfile` (node:*-bookworm-slim) and the compose files.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "chore(deps)"

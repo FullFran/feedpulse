@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-
 import { DatabaseService } from '../../infrastructure/persistence/database.service';
 import { canonicalizeArticleLink } from './domain/canonical-article-link';
 
@@ -76,6 +75,50 @@ export interface CreatedAlert {
   id: string;
   entryId: string;
   ruleId: number;
+}
+
+/**
+ * Outcome of one aggregated alert upsert batch.
+ *
+ * PRODUCT DECISION (deliberate, do not "fix" by resetting `sent`): when a newly
+ * activated rule matches an article that already produced an alert, the alert's
+ * `matched_rules` grows but no notification is sent again. `DeliverAlertUseCase`
+ * would answer `already_sent`, and re-opening delivery would push an article the
+ * user has already seen back into their inbox. Those alerts are reported
+ * separately in `ruleSetExtended` so ingestion can log the event instead of
+ * swallowing it; a dedicated "rules changed" digest is the follow-up, not a
+ * `sent = false` reset.
+ */
+export interface AlertUpsertOutcome {
+  /** Alerts this batch genuinely inserted. Only these are worth delivering. */
+  created: CreatedAlert[];
+  /** Pre-existing alerts whose matched-rule set grew. Already delivered; not re-delivered. */
+  ruleSetExtended: CreatedAlert[];
+}
+
+/**
+ * Physical column backing each delivery channel.
+ *
+ * This is the only place in the repository where a value ends up in SQL text
+ * rather than in a placeholder, so the mapping is a frozen literal table and an
+ * unknown channel throws. The TypeScript union alone is not a runtime
+ * guarantee: types are erased, and a channel string arriving from a queue
+ * payload would otherwise be interpolated straight into the statement.
+ */
+const CHANNEL_DELIVERY_STATUS_COLUMNS = Object.freeze({
+  webhook: 'webhook_delivery_status',
+  telegram: 'telegram_delivery_status',
+  email: 'email_delivery_status',
+} as const);
+
+export type DeliveryChannel = keyof typeof CHANNEL_DELIVERY_STATUS_COLUMNS;
+
+function deliveryStatusColumn(channel: DeliveryChannel): string {
+  if (!Object.prototype.hasOwnProperty.call(CHANNEL_DELIVERY_STATUS_COLUMNS, channel)) {
+    throw new Error(`unknown_alert_delivery_channel:${String(channel)}`);
+  }
+
+  return CHANNEL_DELIVERY_STATUS_COLUMNS[channel];
 }
 
 export interface AlertChannelDeliveryStatus {
@@ -171,131 +214,152 @@ function mapAlert(row: AlertRow): AlertNotificationRecord {
 export class AlertsRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
-  async createForMatches(matches: Array<{ entryId: string; ruleId: number }>, executor: QueryExecutor = this.databaseService): Promise<CreatedAlert[]> {
-    const created: CreatedAlert[] = [];
-
-    for (const match of matches) {
-      const entryResult = await executor.query<{ tenant_id: string; link: string | null }>(
-        `
-          SELECT tenant_id, link
-          FROM entries
-          WHERE id = $1::bigint
-        `,
-        [match.entryId],
-      );
-
-      const entry = entryResult.rows[0];
-      if (!entry) {
-        continue;
-      }
-
-      const canonicalLink = canonicalizeArticleLink(entry.link);
-
-      const result = await executor.query<{ id: string }>(
-        `
-          INSERT INTO alerts (tenant_id, entry_id, rule_id, canonical_link)
-          VALUES ($1::text, $2::bigint, $3::int, $4::text)
-          ON CONFLICT DO NOTHING
-          RETURNING id
-        `,
-        [entry.tenant_id, match.entryId, match.ruleId, canonicalLink],
-      );
-
-      if (result.rows[0]) {
-        created.push({
-          id: result.rows[0].id,
-          entryId: match.entryId,
-          ruleId: match.ruleId,
-        });
-      }
-    }
-
-    return created;
-  }
-
   /**
-   * Create alerts with aggregated matching rules (ONE alert per article).
-   * This replaces the one-alert-per-rule behavior.
-   * @param matchesByEntry Map of entryId -> array of matching rule IDs
+   * Upsert one alert per article for a whole ingestion batch.
+   *
+   * Two round-trips total (one read of the entries, one write), regardless of
+   * batch size. The previous implementation issued a SELECT, then an UPDATE or
+   * an INSERT per entry — roughly three round-trips per matched entry inside an
+   * open transaction, so a 200-item feed cost ~600 — and its read-modify-write
+   * on `matched_rules` could lose a concurrently appended rule.
+   *
+   * Dedupe is delegated to the unique index created by migration 0018 on
+   * `(tenant_id, COALESCE(canonical_link, 'entry:' || entry_id::text))`. The
+   * `ON CONFLICT` inference expression must stay byte-for-byte identical to that
+   * index definition or Postgres refuses the statement at runtime. Using the
+   * COALESCE fallback (rather than the partial index from 0013) also covers
+   * entries with no usable link, which otherwise duplicate freely because a
+   * partial index does not constrain NULLs.
+   *
+   * `xmax = 0` is true only for tuples this statement inserted, which is what
+   * separates a genuinely new alert (deliver it, count it) from an existing one
+   * that merely gained a rule (do not re-deliver).
+   *
+   * @param matchesByEntry entryId -> matching rule IDs
    */
   async createForEntryWithRules(
     matchesByEntry: Map<string, number[]>,
     executor: QueryExecutor = this.databaseService,
-  ): Promise<CreatedAlert[]> {
-    const created: CreatedAlert[] = [];
+  ): Promise<AlertUpsertOutcome> {
+    const entryIds = [...matchesByEntry.entries()]
+      .filter(([, ruleIds]) => ruleIds.length > 0)
+      .map(([entryId]) => entryId);
 
-    for (const [entryId, ruleIds] of matchesByEntry) {
-      const entryResult = await executor.query<{ tenant_id: string; link: string | null }>(
-        `
-          SELECT tenant_id, link
-          FROM entries
-          WHERE id = $1::bigint
-        `,
-        [entryId],
-      );
+    if (entryIds.length === 0) {
+      return { created: [], ruleSetExtended: [] };
+    }
 
-      const entry = entryResult.rows[0];
-      if (!entry || ruleIds.length === 0) {
+    const entriesResult = await executor.query<{ id: string; tenant_id: string; link: string | null }>(
+      `
+        SELECT id::text AS id, tenant_id, link
+        FROM entries
+        WHERE id = ANY($1::bigint[])
+        ORDER BY id ASC
+      `,
+      [entryIds],
+    );
+
+    // Collapse entries that share a dedupe key before hitting the database:
+    // Postgres rejects an ON CONFLICT DO UPDATE that would touch the same row
+    // twice in one statement, and one feed can legitimately publish the same
+    // article under two items.
+    const upserts = new Map<
+      string,
+      { tenantId: string; entryId: string; ruleIds: Set<number>; canonicalLink: string | null }
+    >();
+
+    for (const row of entriesResult.rows) {
+      const ruleIds = matchesByEntry.get(row.id);
+
+      if (!ruleIds || ruleIds.length === 0) {
         continue;
       }
 
-      const canonicalLink = canonicalizeArticleLink(entry.link);
+      const canonicalLink = canonicalizeArticleLink(row.link);
+      // ASCII unit separator (U+001F), not NUL: a literal NUL byte in the source makes
+      // ripgrep classify this whole file as binary and skip it in ordinary searches.
+      // U+001F is equally collision-safe here — it cannot occur in a tenant id or a URL.
+      const dedupeKey = `${row.tenant_id}\u001f${canonicalLink ?? `entry:${row.id}`}`;
+      const pending = upserts.get(dedupeKey);
 
-      // First, try to find existing alert for this canonical link
-      const existingResult = await executor.query<{ id: string; matched_rules: number[] }>(
-        `
-          SELECT id, matched_rules
-          FROM alerts
-          WHERE tenant_id = $1 AND canonical_link = $2
-        `,
-        [entry.tenant_id, canonicalLink],
-      );
-
-      if (existingResult.rows[0]) {
-        // Update with additional rules
-        const existingRules = existingResult.rows[0].matched_rules || [];
-        const combinedRules = [...new Set([...existingRules, ...ruleIds])];
-
-        await executor.query(
-          `
-            UPDATE alerts
-            SET matched_rules = $2::int[]
-            WHERE id = $1
-          `,
-          [existingResult.rows[0].id, combinedRules],
-        );
-
-        created.push({
-          id: existingResult.rows[0].id,
-          entryId: entryId,
-          ruleId: ruleIds[0],
-        });
-      } else {
-        // Insert new alert
-        const result = await executor.query<{ id: string }>(
-          `
-            INSERT INTO alerts (tenant_id, entry_id, rule_id, matched_rules, canonical_link)
-            VALUES ($1::text, $2::bigint, $3::int, $4::int[], $5::text)
-            ON CONFLICT DO NOTHING
-            RETURNING id
-          `,
-          [entry.tenant_id, entryId, ruleIds[0], ruleIds, canonicalLink],
-        );
-
-        if (result.rows[0]) {
-          created.push({
-            id: result.rows[0].id,
-            entryId: entryId,
-            ruleId: ruleIds[0],
-          });
+      if (pending) {
+        for (const ruleId of ruleIds) {
+          pending.ruleIds.add(ruleId);
         }
+        continue;
       }
+
+      upserts.set(dedupeKey, {
+        tenantId: row.tenant_id,
+        entryId: row.id,
+        ruleIds: new Set(ruleIds),
+        canonicalLink,
+      });
     }
 
-    return created;
+    if (upserts.size === 0) {
+      return { created: [], ruleSetExtended: [] };
+    }
+
+    const tenantIds: string[] = [];
+    const upsertEntryIds: string[] = [];
+    const primaryRuleIds: number[] = [];
+    // Postgres cannot unnest an array of arrays, so matched_rules travels as
+    // array literals in a text[] and is cast back per row.
+    const matchedRuleLiterals: string[] = [];
+    const canonicalLinks: Array<string | null> = [];
+
+    for (const upsert of upserts.values()) {
+      const sortedRuleIds = [...upsert.ruleIds].sort((a, b) => a - b);
+      const primaryRuleId = sortedRuleIds[0];
+
+      // Entries are only added to `upserts` with at least one matched rule, so
+      // this is unreachable in practice. It stays as a guard rather than a
+      // non-null assertion because an alert has no meaning without a primary
+      // rule: skipping is correct, inserting `undefined` into a bigint[] is not.
+      if (primaryRuleId === undefined) {
+        continue;
+      }
+
+      tenantIds.push(upsert.tenantId);
+      upsertEntryIds.push(upsert.entryId);
+      primaryRuleIds.push(primaryRuleId);
+      matchedRuleLiterals.push(`{${sortedRuleIds.join(',')}}`);
+      canonicalLinks.push(upsert.canonicalLink);
+    }
+
+    const result = await executor.query<{ id: string; entry_id: string; rule_id: number; inserted: boolean }>(
+      `
+        INSERT INTO alerts (tenant_id, entry_id, rule_id, matched_rules, canonical_link)
+        SELECT v.tenant_id, v.entry_id, v.rule_id, v.matched_rules::int[], v.canonical_link
+        FROM unnest($1::text[], $2::bigint[], $3::int[], $4::text[], $5::text[])
+          AS v(tenant_id, entry_id, rule_id, matched_rules, canonical_link)
+        ON CONFLICT (tenant_id, (COALESCE(canonical_link, 'entry:' || entry_id::text)))
+        DO UPDATE SET matched_rules = ARRAY(
+          SELECT DISTINCT unnest(alerts.matched_rules || EXCLUDED.matched_rules) ORDER BY 1
+        )
+        RETURNING id::text AS id, entry_id::text AS entry_id, rule_id, (xmax = 0) AS inserted
+      `,
+      [tenantIds, upsertEntryIds, primaryRuleIds, matchedRuleLiterals, canonicalLinks],
+    );
+
+    const created: CreatedAlert[] = [];
+    const ruleSetExtended: CreatedAlert[] = [];
+
+    for (const row of result.rows) {
+      const alert: CreatedAlert = { id: row.id, entryId: row.entry_id, ruleId: row.rule_id };
+      (row.inserted ? created : ruleSetExtended).push(alert);
+    }
+
+    return { created, ruleSetExtended };
   }
 
-  async list(input: { tenantId: string; page: number; pageSize: number; sent?: boolean }): Promise<{ items: AlertView[]; total: number }> {
+  async list(input: {
+    tenantId: string;
+    page: number;
+    pageSize: number;
+    sent?: boolean;
+  }): Promise<{ items: AlertView[]; total: number }> {
     const where: string[] = ['a.tenant_id = $1'];
     const values: unknown[] = [input.tenantId];
 
@@ -354,71 +418,72 @@ export class AlertsRepository {
     };
   }
 
-async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord | null> {
-    const result = tenantId
-      ? await this.databaseService.query<AlertRow>(
-        `
-          SELECT a.id,
-                 a.tenant_id,
-                 a.sent,
-                 a.sent_at,
-                 a.delivery_status,
-                 a.delivery_attempts,
-                 a.last_delivery_attempt_at,
-                 a.last_delivery_error,
-                 a.last_delivery_queued_at,
-                 a.created_at,
-                 a.matched_rules,
-                 a.webhook_delivery_status,
-                 a.telegram_delivery_status,
-                 a.email_delivery_status,
-                 e.id AS entry_id,
-                 e.title AS entry_title,
-                 e.link AS entry_link,
-                 e.content AS entry_content,
-                 COALESCE((a.matched_rules)[1], a.rule_id) AS rule_id,
-                 r.name AS rule_name,
-                 r.include_keywords AS rule_include_keywords,
-                 r.exclude_keywords AS rule_exclude_keywords
-          FROM alerts a
-          INNER JOIN entries e ON e.id = a.entry_id
-          INNER JOIN rules r ON r.id = COALESCE((a.matched_rules)[1], a.rule_id)
-          WHERE a.id = $1
-            AND a.tenant_id = $2
-        `,
-        [id, tenantId],
-      )
-      : await this.databaseService.query<AlertRow>(
-        `
-          SELECT a.id,
-                 a.tenant_id,
-                 a.sent,
-                 a.sent_at,
-                 a.delivery_status,
-                 a.delivery_attempts,
-                 a.last_delivery_attempt_at,
-                 a.last_delivery_error,
-                 a.last_delivery_queued_at,
-                 a.created_at,
-                 a.matched_rules,
-                 a.webhook_delivery_status,
-                 a.telegram_delivery_status,
-                 a.email_delivery_status,
-                 e.id AS entry_id,
-                 e.title AS entry_title,
-                 e.link AS entry_link,
-                 e.content AS entry_content,
-                 COALESCE((a.matched_rules)[1], a.rule_id) AS rule_id,
-                 r.name AS rule_name,
-                 r.include_keywords AS rule_include_keywords,
-                 r.exclude_keywords AS rule_exclude_keywords
-          FROM alerts a
-          INNER JOIN entries e ON e.id = a.entry_id
-          INNER JOIN rules r ON r.id = COALESCE((a.matched_rules)[1], a.rule_id)
-          WHERE a.id = $1
-        `,
-        [id],
-      );
+  /**
+   * Column list shared by every alert-detail lookup. Kept in one place so the tenant-scoped
+   * and the deliberately unscoped variant can never drift apart.
+   */
+  private static readonly ALERT_DETAIL_SELECT = `
+    SELECT a.id,
+           a.tenant_id,
+           a.sent,
+           a.sent_at,
+           a.delivery_status,
+           a.delivery_attempts,
+           a.last_delivery_attempt_at,
+           a.last_delivery_error,
+           a.last_delivery_queued_at,
+           a.created_at,
+           a.matched_rules,
+           a.webhook_delivery_status,
+           a.telegram_delivery_status,
+           a.email_delivery_status,
+           e.id AS entry_id,
+           e.title AS entry_title,
+           e.link AS entry_link,
+           e.content AS entry_content,
+           COALESCE((a.matched_rules)[1], a.rule_id) AS rule_id,
+           r.name AS rule_name,
+           r.include_keywords AS rule_include_keywords,
+           r.exclude_keywords AS rule_exclude_keywords
+    FROM alerts a
+    INNER JOIN entries e ON e.id = a.entry_id
+    INNER JOIN rules r ON r.id = COALESCE((a.matched_rules)[1], a.rule_id)
+  `;
+
+  /**
+   * Tenant-scoped alert lookup. Always pass a tenant id from an authenticated request.
+   *
+   * TODO(tenant-isolation): make `tenantId` required and let the two cross-tenant callers use
+   * `findByIdForWorker` explicitly. Blocked by two files outside this unit's edit scope:
+   * `alerts/application/get-alert.use-case.ts` (declares `tenantId?: string`) and
+   * `alerts/application/process-alert-delivery.use-case.ts` (calls `findById(input.alertId)`).
+   * Until then, an omitted tenant id is routed through `findByIdForWorker` so the widening is
+   * at least explicit in one place instead of being a hidden branch inside the SQL.
+   */
+  async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord | null> {
+    return tenantId === undefined ? this.findByIdForWorker(id) : this.findByIdForTenant(id, tenantId);
+  }
+
+  /** Tenant-scoped alert lookup with a REQUIRED tenant id. */
+  async findByIdForTenant(id: number, tenantId: string): Promise<AlertNotificationRecord | null> {
+    const result = await this.databaseService.query<AlertRow>(
+      `${AlertsRepository.ALERT_DETAIL_SELECT} WHERE a.id = $1 AND a.tenant_id = $2`,
+      [id, tenantId],
+    );
+
+    return result.rows[0] ? mapAlert(result.rows[0]) : null;
+  }
+
+  /**
+   * Deliberately cross-tenant alert lookup for queue consumers, which are handed an alert id
+   * by BullMQ and derive the tenant from the row they read. Never reachable from an HTTP
+   * handler. Grep for this name to enumerate every cross-tenant alert read.
+   */
+  async findByIdForWorker(id: number): Promise<AlertNotificationRecord | null> {
+    const result = await this.databaseService.query<AlertRow>(
+      `${AlertsRepository.ALERT_DETAIL_SELECT} WHERE a.id = $1`,
+      [id],
+    );
 
     return result.rows[0] ? mapAlert(result.rows[0]) : null;
   }
@@ -491,14 +556,48 @@ async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord |
    * Mark a specific channel as delivered (sent).
    * This is used for per-channel delivery tracking.
    */
-  async markChannelDelivered(id: number, channel: 'webhook' | 'telegram' | 'email', executor: QueryExecutor = this.databaseService): Promise<void> {
-    const column = `${channel}_delivery_status`;
+  async markChannelDelivered(
+    id: number,
+    channel: DeliveryChannel,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<void> {
+    const column = deliveryStatusColumn(channel);
     await executor.query(
       `
         UPDATE alerts
         SET ${column} = 'sent',
             last_delivery_attempt_at = NOW()
         WHERE id = $1
+      `,
+      [id],
+    );
+  }
+
+  /**
+   * Mark a specific channel as terminally failed for this alert.
+   *
+   * Used for failures that a retry cannot fix — today only "the tenant burned
+   * its daily email quota". Leaving such a channel on `pending` is the worse
+   * option: `checkAllChannelsDelivered` would never converge, the alert would
+   * sit in `pending` forever and the operator would have no idea why. A
+   * `failed` channel is at least visible in `GET /alerts`.
+   *
+   * A channel already marked `sent` is never demoted: a later attempt that
+   * fails must not erase a delivery the reader already received.
+   */
+  async markChannelFailed(
+    id: number,
+    channel: DeliveryChannel,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<void> {
+    const column = deliveryStatusColumn(channel);
+    await executor.query(
+      `
+        UPDATE alerts
+        SET ${column} = 'failed',
+            last_delivery_attempt_at = NOW()
+        WHERE id = $1
+          AND ${column} <> 'sent'
       `,
       [id],
     );
@@ -531,7 +630,11 @@ async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord |
   /**
    * Mark delivery as retrying/pending (for partial delivery scenarios).
    */
-  async markDeliveryRetryPending(id: number, attemptNumber: number, executor: QueryExecutor = this.databaseService): Promise<void> {
+  async markDeliveryRetryPending(
+    id: number,
+    attemptNumber: number,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<void> {
     await executor.query(
       `
         UPDATE alerts
@@ -601,14 +704,16 @@ async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord |
         [group.tenant_id, group.chat_id, input.nowIso],
       );
 
-      if (!itemsResult.rows.length) {
+      const firstItem = itemsResult.rows[0];
+
+      if (!firstItem) {
         continue;
       }
 
       result.push({
         tenantId: group.tenant_id,
         chatId: group.chat_id,
-        scheduledFor: itemsResult.rows[0].scheduled_for.toISOString(),
+        scheduledFor: firstItem.scheduled_for.toISOString(),
         items: itemsResult.rows.map((row) => ({
           digestItemId: Number(row.digest_item_id),
           alertId: row.alert_id,
@@ -623,20 +728,103 @@ async findById(id: number, tenantId?: string): Promise<AlertNotificationRecord |
     return result;
   }
 
-  async markTelegramDigestItemsSent(itemIds: number[]): Promise<void> {
-    if (!itemIds.length) {
-      return;
+  /**
+   * Flush one digest group: mark its items sent, then converge the Telegram
+   * channel of every alert that has no unsent digest item left.
+   *
+   * Without the second half, `alerts.telegram_delivery_status` stayed `'pending'`
+   * forever for every `digest_10m` tenant — the digest went out, but the API,
+   * the dashboard and the `idx_alerts_telegram_status_pending` partial index all
+   * kept reporting the alert as undelivered.
+   *
+   * The convergence guard is `id NOT IN (unsent digest items)`, so an alert
+   * fanned out to several chat ids is only marked once the LAST chat has been
+   * flushed. `telegram_digest_items.alert_id` is `NOT NULL`, so the classic
+   * `NOT IN` NULL trap cannot apply here.
+   *
+   * WHY NOT ONE STATEMENT: a data-modifying CTE (`WITH marked AS (UPDATE …)`)
+   * would make item-marking and convergence atomic, but pg-mem — the engine
+   * behind the emulator-backed integration suites — rejects it outright
+   * ("WITH nested statement with query type 'update'"), and `DatabaseService`
+   * exposes no client checkout, so an explicit transaction is not reachable
+   * from a pg-mem pool either. The crash window between the two writes is
+   * closed by `reconcileTelegramDigestDeliveryStatus`, which every sweep runs
+   * first — a crash here self-heals on the next tick instead of leaving a
+   * permanently pending channel.
+   *
+   * @returns ids of the alerts whose Telegram channel this call converged.
+   */
+  async markTelegramDigestGroupSent(
+    items: ReadonlyArray<{ digestItemId: number; alertId: string }>,
+  ): Promise<{ alertIdsDelivered: string[] }> {
+    if (!items.length) {
+      return { alertIdsDelivered: [] };
     }
 
-    for (const itemId of itemIds) {
+    for (const item of items) {
       await this.databaseService.query(
         `
           UPDATE telegram_digest_items
           SET sent_at = NOW()
           WHERE id = $1
+            AND sent_at IS NULL
         `,
-        [itemId],
+        [item.digestItemId],
       );
     }
+
+    const alertIdsDelivered: string[] = [];
+    for (const alertId of new Set(items.map((item) => item.alertId))) {
+      const converged = await this.databaseService.query<{ id: string }>(
+        `
+          UPDATE alerts
+          SET telegram_delivery_status = 'sent',
+              last_delivery_attempt_at = NOW()
+          WHERE id = $1
+            AND telegram_delivery_status <> 'sent'
+            AND id NOT IN (SELECT alert_id FROM telegram_digest_items WHERE sent_at IS NULL)
+          RETURNING id
+        `,
+        [alertId],
+      );
+
+      const convergedRow = converged.rows[0];
+
+      if (convergedRow) {
+        alertIdsDelivered.push(String(convergedRow.id));
+      }
+    }
+
+    return { alertIdsDelivered };
+  }
+
+  /**
+   * Converge every digest-mode alert whose items are all sent but whose Telegram
+   * channel is still `'pending'`.
+   *
+   * Two jobs in one query. It closes the crash window inside
+   * `markTelegramDigestGroupSent`, and it repairs the backlog left by the
+   * versions of this code that never marked the channel at all — those rows
+   * would otherwise stay in the partial pending index forever.
+   *
+   * Only alerts that actually have digest items are touched, so an instant-mode
+   * alert whose Telegram send failed is never silently promoted to `'sent'`.
+   *
+   * @returns ids of the alerts repaired by this pass.
+   */
+  async reconcileTelegramDigestDeliveryStatus(): Promise<{ alertIdsDelivered: string[] }> {
+    const result = await this.databaseService.query<{ id: string }>(
+      `
+        UPDATE alerts
+        SET telegram_delivery_status = 'sent',
+            last_delivery_attempt_at = NOW()
+        WHERE telegram_delivery_status = 'pending'
+          AND id IN (SELECT alert_id FROM telegram_digest_items WHERE sent_at IS NOT NULL)
+          AND id NOT IN (SELECT alert_id FROM telegram_digest_items WHERE sent_at IS NULL)
+        RETURNING id
+      `,
+    );
+
+    return { alertIdsDelivered: result.rows.map((row) => String(row.id)) };
   }
 }

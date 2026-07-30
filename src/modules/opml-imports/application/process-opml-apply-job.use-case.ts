@@ -1,14 +1,15 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-
 import { DatabaseService } from '../../../infrastructure/persistence/database.service';
+import {
+  FETCH_FEED_QUEUE_TOKEN,
+  FetchFeedQueuePort,
+  OpmlApplyImportJobData,
+} from '../../../infrastructure/queue/queue.constants';
 import { AppConfigService } from '../../../shared/config/app-config.service';
-import { FETCH_FEED_QUEUE_TOKEN, FetchFeedQueuePort, OpmlApplyImportJobData } from '../../../infrastructure/queue/queue.constants';
-
 import { assertValidOpmlImportStatusTransition } from '../domain/opml-import-status';
-import { buildNormalizedFeedUrlHash } from '../domain/url-normalizer';
-import { normalizeFeedUrl } from '../domain/url-normalizer';
-import { OpmlImportObservabilityService } from './opml-import-observability.service';
+import { buildNormalizedFeedUrlHash, normalizeFeedUrl } from '../domain/url-normalizer';
 import { OpmlImportsRepository } from '../opml-imports.repository';
+import { OpmlImportObservabilityService } from './opml-import-observability.service';
 
 interface FeedUpsertRow {
   id: number;
@@ -28,7 +29,7 @@ export class ProcessOpmlApplyJobUseCase {
   ) {}
 
   async execute(job: OpmlApplyImportJobData): Promise<void> {
-    const current = await this.opmlImportsRepository.getImportOrThrow(job.importId);
+    const current = await this.opmlImportsRepository.getImportOrThrowForWorker(job.importId);
     const tenantId = await this.opmlImportsRepository.getImportTenantId(job.importId);
     if (current.status === 'completed') {
       return;
@@ -60,7 +61,11 @@ export class ProcessOpmlApplyJobUseCase {
         try {
           const upsert = await this.upsertFeed(tenantId, item.normalizedUrl, client);
           if (upsert.collision) {
-            await this.opmlImportsRepository.markItemFailed(Number(item.id), 'normalized_hash_collision_detected', client);
+            await this.opmlImportsRepository.markItemFailed(
+              Number(item.id),
+              'normalized_hash_collision_detected',
+              client,
+            );
             failedItems += 1;
             continue;
           }
@@ -95,7 +100,8 @@ export class ProcessOpmlApplyJobUseCase {
             invalidItems: grouped.invalid ?? 0,
             duplicateItems: grouped.duplicate ?? 0,
             existingItems: grouped.existing ?? 0,
-            validItems: (grouped.new ?? 0) + (grouped.existing ?? 0) + (grouped.duplicate ?? 0) + (grouped.imported ?? 0),
+            validItems:
+              (grouped.new ?? 0) + (grouped.existing ?? 0) + (grouped.duplicate ?? 0) + (grouped.imported ?? 0),
             totalItems: Object.values(grouped).reduce((sum, value) => sum + value, 0),
           },
         },
@@ -126,7 +132,11 @@ export class ProcessOpmlApplyJobUseCase {
     }
   }
 
-  private async upsertFeed(tenantId: string, normalizedUrl: string, executor: Pick<DatabaseService, 'query'>): Promise<{ feedId: number; created: boolean; collision: boolean }> {
+  private async upsertFeed(
+    tenantId: string,
+    normalizedUrl: string,
+    executor: Pick<DatabaseService, 'query'>,
+  ): Promise<{ feedId: number; created: boolean; collision: boolean }> {
     const normalizedHash = buildNormalizedFeedUrlHash(normalizedUrl);
 
     const jitterSeconds = Math.floor(Math.random() * Math.max(1, this.appConfigService.opmlInitialJitterMaxSeconds));

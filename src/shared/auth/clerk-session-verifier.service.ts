@@ -1,5 +1,4 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-
 import { AppConfigService } from '../config/app-config.service';
 
 interface ClerkTokenClaims {
@@ -22,25 +21,45 @@ function decodeBase64Url(value: string): string {
 
 function parseJwtClaims(token: string): ClerkTokenClaims {
   const segments = token.split('.');
-  if (segments.length !== 3) {
+  const payloadSegment = segments[1];
+
+  if (segments.length !== 3 || payloadSegment === undefined) {
     throw new UnauthorizedException('invalid_clerk_token');
   }
 
+  let payload: ClerkTokenClaims;
   try {
-    const payload = JSON.parse(decodeBase64Url(segments[1])) as ClerkTokenClaims;
-    if (!payload.sub || typeof payload.sub !== 'string') {
-      throw new UnauthorizedException('invalid_clerk_token_subject');
-    }
-    return payload;
+    payload = JSON.parse(decodeBase64Url(payloadSegment)) as ClerkTokenClaims;
   } catch {
     throw new UnauthorizedException('invalid_clerk_token_payload');
   }
+
+  // Checked outside the try/catch: swallowing our own rejection would report every malformed
+  // subject as a payload decoding failure and make `invalid_clerk_token_subject` unreachable.
+  if (!payload || typeof payload.sub !== 'string' || payload.sub.length === 0) {
+    throw new UnauthorizedException('invalid_clerk_token_subject');
+  }
+
+  return payload;
 }
 
 @Injectable()
 export class ClerkSessionVerifierService {
   constructor(private readonly appConfigService: AppConfigService) {}
 
+  /**
+   * DESIGN NOTE — the JWT signature is deliberately NOT verified here.
+   *
+   * The token is treated as an untrusted claims envelope: the only thing taken from it is the
+   * session id (`sid`) and the subject (`sub`). Authority comes from the server-to-server lookup
+   * of that session against the Clerk API using CLERK_SECRET_KEY. A forged, unsigned token
+   * therefore cannot authenticate, because an attacker cannot invent a session id that Clerk
+   * reports as `active`. The `user_id !== sub` check closes the remaining hole: replaying a valid
+   * session id belonging to another user (token substitution) is rejected.
+   *
+   * The trade-off is one network round trip per request instead of local signature verification.
+   * Do not "optimise" this by trusting the claims without the lookup.
+   */
   async verify(token: string): Promise<VerifiedClerkSession> {
     const claims = parseJwtClaims(token);
     const now = Math.floor(Date.now() / 1000);

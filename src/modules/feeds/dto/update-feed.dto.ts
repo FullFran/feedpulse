@@ -1,5 +1,5 @@
-import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsIn, IsInt, IsOptional, Max, Min } from 'class-validator';
 
 export class UpdateFeedDto {
   @ApiPropertyOptional({ minimum: 300, maximum: 10800, example: 600 })

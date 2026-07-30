@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { Counter, Histogram } from 'prom-client';
-
 import { SHARED_METRICS_REGISTRY } from '../../observability/metrics-registry';
 
 type OpmlJobStage = 'parse' | 'apply';

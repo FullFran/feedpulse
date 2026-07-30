@@ -63,3 +63,18 @@ Optional overrides:
 - The webhook notifier delivered the same number of alert payloads to the local fixture.
 
 The harness is intentionally conservative for the first run. Start with `100`, inspect the artifacts, then scale up.
+
+## Reading the published chart
+
+[`benchmark-scaling-chart.svg`](./benchmark-scaling-chart.svg) is the result of one local
+run covering the `100, 1000, 5000, 10000` stages. It records total wall time growing as
+roughly `O(n^0.55)` and per-feed costs of `21.66 → 53.53 → 2.24 → 5.75 ms/feed`.
+
+Two caveats matter when quoting those numbers:
+
+- The feeds are served by the deterministic local fixture in `scripts/smoke`, not by the
+  live internet. The chart measures the ingestion pipeline — queue, fetch, parse, dedupe,
+  match, persist — with network variance removed on purpose.
+- It is a single run on unspecified hardware. Absolute milliseconds are machine-dependent
+  and do not transfer; the exponent and the shape of the curve are what the run evidences.
+  Re-run the stages on your own machine before comparing.

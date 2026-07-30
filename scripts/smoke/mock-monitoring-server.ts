@@ -64,7 +64,10 @@ const server = createServer(async (request, response) => {
   const method = request.method ?? 'GET';
   const stats = () => buildFixtureStats(captures, requestLogs);
   const offset = Number.parseInt(url.searchParams.get('offset') ?? '0', 10);
-  const limit = Number.parseInt(url.searchParams.get('limit') ?? `${Math.max(captures.length, requestLogs.length, 1)}`, 10);
+  const limit = Number.parseInt(
+    url.searchParams.get('limit') ?? `${Math.max(captures.length, requestLogs.length, 1)}`,
+    10,
+  );
 
   if (method === 'GET' && url.pathname === '/health') {
     recordRequest(request, 200);

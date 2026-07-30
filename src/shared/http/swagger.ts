@@ -1,6 +1,6 @@
-import { Type, applyDecorators } from '@nestjs/common';
+import type { Type } from '@nestjs/common';
+import { applyDecorators } from '@nestjs/common';
 import { ApiExtraModels, ApiResponse, getSchemaPath } from '@nestjs/swagger';
-
 import { ApiMetaModel, ErrorEnvelopeModel, PaginatedMetaModel } from './swagger.models';
 
 function buildEnvelopeSchema(model: Type<unknown>, isArray: boolean, paginated: boolean) {
@@ -44,6 +44,11 @@ export function ApiStandardErrorResponses() {
     ApiResponse({
       status: 400,
       description: 'Invalid request payload or query parameters.',
+      schema: { $ref: getSchemaPath(ErrorEnvelopeModel) },
+    }),
+    ApiResponse({
+      status: 401,
+      description: 'Missing, unknown or revoked credential. Send `x-api-key: <key>` or `Authorization: Bearer <key>`.',
       schema: { $ref: getSchemaPath(ErrorEnvelopeModel) },
     }),
     ApiResponse({

@@ -22,27 +22,34 @@ export class PaginatedMetaModel extends ApiMetaModel {
   has_next!: boolean;
 }
 
-export class ErrorBodyModel {
-  @ApiProperty({ example: 'feed_invalid_url' })
+/**
+ * Error envelope emitted by `AllExceptionsFilter` for every failing request.
+ * Stack traces and internal class names are never part of the response.
+ */
+export class ErrorEnvelopeModel {
+  @ApiProperty({ example: 404 })
+  statusCode!: number;
+
+  @ApiProperty({
+    description: 'Stable machine-readable error code, lower snake_case.',
+    example: 'feed_not_found',
+  })
   code!: string;
 
-  @ApiProperty({ example: 'Validation failed' })
+  @ApiProperty({ description: 'Human-readable error description.', example: 'feed_not_found' })
   message!: string;
 
-  @ApiPropertyOptional({
-    type: 'object',
-    additionalProperties: true,
-    example: { field: 'url' },
+  @ApiProperty({ example: '2026-03-21T12:00:00.000Z' })
+  timestamp!: string;
+
+  @ApiProperty({ description: 'Request path that produced the error.', example: '/api/v1/feeds/101' })
+  path!: string;
+
+  @ApiProperty({
+    description: 'Correlation id, echoed back in the `x-request-id` response header.',
+    example: 'a7b3d7f0-5f78-4cba-8f4d-cf2c92ad2f76',
   })
-  details?: Record<string, unknown>;
-}
-
-export class ErrorEnvelopeModel {
-  @ApiProperty({ type: () => ErrorBodyModel })
-  error!: ErrorBodyModel;
-
-  @ApiProperty({ type: () => ApiMetaModel })
-  meta!: ApiMetaModel;
+  requestId!: string;
 }
 
 export class FeedModel {
@@ -93,8 +100,13 @@ export class FeedCheckNowResultModel {
   @ApiProperty({ example: 101 })
   id!: number;
 
-  @ApiProperty({ enum: ['queued'], example: 'queued' })
-  status!: 'queued';
+  @ApiProperty({
+    enum: ['queued', 'already_queued'],
+    example: 'queued',
+    description:
+      '`already_queued` means the feed currently holds a scheduler claim, i.e. a fetch is already in flight.',
+  })
+  status!: 'queued' | 'already_queued';
 }
 
 export class RuleModel {

@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-
 import { SettingsRepository } from '../settings.repository';
 import { DEFAULT_TELEGRAM_DELIVERY_MODE, TelegramDeliveryMode } from '../settings.types';
 

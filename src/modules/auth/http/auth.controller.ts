@@ -1,7 +1,6 @@
 import { Controller, Get, Req } from '@nestjs/common';
-import { Request } from 'express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-
+import { Request } from 'express';
 import { AppConfigService } from '../../../shared/config/app-config.service';
 import { successResponse } from '../../../shared/http/response';
 
