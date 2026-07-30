@@ -22,7 +22,8 @@ interface AlertRecord {
 }
 
 const apiBaseUrl = process.env.SMOKE_API_BASE_URL ?? 'http://127.0.0.1:3000';
-const fixturePublicBaseUrl = process.env.SMOKE_FIXTURE_PUBLIC_URL ?? `http://127.0.0.1:${process.env.SMOKE_MONITORING_PORT ?? '4010'}`;
+const fixturePublicBaseUrl =
+  process.env.SMOKE_FIXTURE_PUBLIC_URL ?? `http://127.0.0.1:${process.env.SMOKE_MONITORING_PORT ?? '4010'}`;
 const fixtureInternalBaseUrl = process.env.SMOKE_FIXTURE_INTERNAL_URL ?? 'http://smoke-monitoring:4010';
 const artifactsDir = process.env.SMOKE_ARTIFACTS_DIR ?? join(process.cwd(), 'artifacts', 'smoke');
 const composeProject = process.env.SMOKE_COMPOSE_PROJECT ?? 'rss-monitor-smoke';
@@ -100,7 +101,9 @@ async function runDockerCompose(commandArgs: string[]): Promise<void> {
   }
 
   if (result.status !== 0) {
-    throw new Error(`docker ${composeArgs.join(' ')} ${commandArgs.join(' ')} exited with code ${result.status ?? 'unknown'}`);
+    throw new Error(
+      `docker ${composeArgs.join(' ')} ${commandArgs.join(' ')} exited with code ${result.status ?? 'unknown'}`,
+    );
   }
 }
 
@@ -216,33 +219,45 @@ async function createSmokeEntities(runId: string): Promise<{ ruleName: string; f
 }
 
 async function waitForSentAlert(ruleName: string): Promise<{ alert: AlertRecord; alertsResponse: unknown }> {
-  return poll('sent alert', async () => {
-    const alertsResponse = (await requestJson(`${apiBaseUrl}/api/v1/alerts?page=1&page_size=100`)) as {
-      data: AlertRecord[];
-    };
-    const alert = alertsResponse.data.find((candidate) => candidate.rule.name === ruleName && candidate.sent && candidate.deliveryStatus === 'sent');
+  return poll(
+    'sent alert',
+    async () => {
+      const alertsResponse = (await requestJson(`${apiBaseUrl}/api/v1/alerts?page=1&page_size=100`)) as {
+        data: AlertRecord[];
+      };
+      const alert = alertsResponse.data.find(
+        (candidate) => candidate.rule.name === ruleName && candidate.sent && candidate.deliveryStatus === 'sent',
+      );
 
-    if (!alert) {
-      throw new Error(`No sent alert found yet for rule ${ruleName}`);
-    }
+      if (!alert) {
+        throw new Error(`No sent alert found yet for rule ${ruleName}`);
+      }
 
-    return { alert, alertsResponse };
-  }, 90000, 3000);
+      return { alert, alertsResponse };
+    },
+    90000,
+    3000,
+  );
 }
 
 async function waitForWebhookCapture(ruleName: string): Promise<unknown> {
-  return poll('webhook capture', async () => {
-    const captures = (await requestJson(`${fixturePublicBaseUrl}/captures`)) as {
-      items: Array<{ parsedBody?: { alert?: { rule?: { name?: string } } } }>;
-    };
-    const matched = captures.items.find((candidate) => candidate.parsedBody?.alert?.rule?.name === ruleName);
+  return poll(
+    'webhook capture',
+    async () => {
+      const captures = (await requestJson(`${fixturePublicBaseUrl}/captures`)) as {
+        items: Array<{ parsedBody?: { alert?: { rule?: { name?: string } } } }>;
+      };
+      const matched = captures.items.find((candidate) => candidate.parsedBody?.alert?.rule?.name === ruleName);
 
-    if (!matched) {
-      throw new Error(`No webhook capture found yet for rule ${ruleName}`);
-    }
+      if (!matched) {
+        throw new Error(`No webhook capture found yet for rule ${ruleName}`);
+      }
 
-    return captures;
-  }, 90000, 3000);
+      return captures;
+    },
+    90000,
+    3000,
+  );
 }
 
 async function collectFixtureRequests(): Promise<unknown> {

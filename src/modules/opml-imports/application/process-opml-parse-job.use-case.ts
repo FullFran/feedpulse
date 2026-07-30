@@ -1,14 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-
 import { DatabaseService } from '../../../infrastructure/persistence/database.service';
 import { OpmlParsePreviewJobData } from '../../../infrastructure/queue/queue.constants';
 import { AppConfigService } from '../../../shared/config/app-config.service';
-
 import { assertValidOpmlImportStatusTransition } from '../domain/opml-import-status';
 import { extractOpmlItems } from '../domain/opml-parser';
 import { buildNormalizedFeedUrlHash, normalizeFeedUrl } from '../domain/url-normalizer';
-import { OpmlImportObservabilityService } from './opml-import-observability.service';
 import { OpmlImportItemInput, OpmlImportsRepository } from '../opml-imports.repository';
+import { OpmlImportObservabilityService } from './opml-import-observability.service';
 
 interface ExistingFeedRow {
   id: number;
@@ -29,7 +27,7 @@ export class ProcessOpmlParseJobUseCase {
   ) {}
 
   async execute(job: OpmlParsePreviewJobData): Promise<void> {
-    const current = await this.opmlImportsRepository.getImportOrThrow(job.importId);
+    const current = await this.opmlImportsRepository.getImportOrThrowForWorker(job.importId);
     const tenantId =
       'getImportTenantId' in this.opmlImportsRepository
         ? await this.opmlImportsRepository.getImportTenantId(job.importId)
@@ -51,7 +49,11 @@ export class ProcessOpmlParseJobUseCase {
     try {
       await client.query('BEGIN');
 
-      await this.opmlImportsRepository.markImportStatus(job.importId, { status: 'parsing', errorMessage: null }, client);
+      await this.opmlImportsRepository.markImportStatus(
+        job.importId,
+        { status: 'parsing', errorMessage: null },
+        client,
+      );
 
       const parsedItems = extractOpmlItems(job.opmlXml, {
         maxBytes: this.appConfigService.opmlUploadMaxBytes,
@@ -76,7 +78,8 @@ export class ProcessOpmlParseJobUseCase {
         return local;
       });
       const normalizedCandidates = draftItems.filter(
-        (item): item is OpmlImportItemInput & { normalizedUrlHash: string; normalizedUrl: string } => Boolean(item.normalizedUrlHash && item.normalizedUrl),
+        (item): item is OpmlImportItemInput & { normalizedUrlHash: string; normalizedUrl: string } =>
+          Boolean(item.normalizedUrlHash && item.normalizedUrl),
       );
       const existingByHash = await this.findExistingFeedsByHash(
         tenantId,
@@ -147,7 +150,11 @@ export class ProcessOpmlParseJobUseCase {
     }
   }
 
-  private classifyLocalItem(item: { title: string | null; outlinePath: string | null; sourceXmlUrl: string }): OpmlImportItemInput {
+  private classifyLocalItem(item: {
+    title: string | null;
+    outlinePath: string | null;
+    sourceXmlUrl: string;
+  }): OpmlImportItemInput {
     try {
       const normalizedUrl = normalizeFeedUrl(item.sourceXmlUrl);
       const normalizedUrlHash = buildNormalizedFeedUrlHash(normalizedUrl);

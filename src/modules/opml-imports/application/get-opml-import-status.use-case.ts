@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-
 import { OpmlImportsRepository } from '../opml-imports.repository';
 
 @Injectable()

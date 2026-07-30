@@ -1,7 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-
 import { DatabaseService } from '../../infrastructure/persistence/database.service';
-
 import { OpmlImportStatus } from './domain/opml-import-status';
 
 type QueryExecutor = Pick<DatabaseService, 'query'>;
@@ -119,7 +117,9 @@ export class OpmlImportsRepository {
   constructor(private readonly databaseService: DatabaseService) {}
 
   async getImportTenantId(importId: number, executor: QueryExecutor = this.databaseService): Promise<string> {
-    const result = await executor.query<{ tenant_id: string }>('SELECT tenant_id FROM opml_imports WHERE id = $1', [importId]);
+    const result = await executor.query<{ tenant_id: string }>('SELECT tenant_id FROM opml_imports WHERE id = $1', [
+      importId,
+    ]);
     const row = result.rows[0];
     if (!row) {
       throw new NotFoundException('opml_import_not_found');
@@ -127,7 +127,12 @@ export class OpmlImportsRepository {
     return row.tenant_id;
   }
 
-  async createImport(input: { tenantId: string; fileName: string; fileSizeBytes: number; sourceChecksum: string }): Promise<OpmlImportSummary> {
+  async createImport(input: {
+    tenantId: string;
+    fileName: string;
+    fileSizeBytes: number;
+    sourceChecksum: string;
+  }): Promise<OpmlImportSummary> {
     const result = await this.databaseService.query<OpmlImportRow>(
       `
         INSERT INTO opml_imports (tenant_id, status, file_name, file_size_bytes, source_checksum)
@@ -137,18 +142,100 @@ export class OpmlImportsRepository {
       [input.tenantId, input.fileName, input.fileSizeBytes, input.sourceChecksum],
     );
 
-    return mapImport(result.rows[0]);
+    const row = result.rows[0];
+
+    if (!row) {
+      // `INSERT ... RETURNING *` always yields exactly one row. The guard is
+      // here so the impossible case fails loudly instead of dereferencing
+      // `undefined` inside `mapImport`.
+      throw new Error('opml_import_insert_returned_no_row');
+    }
+
+    return mapImport(row);
   }
 
-  async findImportById(importId: number, tenantId?: string, executor: QueryExecutor = this.databaseService): Promise<OpmlImportSummary | null> {
-    const result = tenantId
-      ? await executor.query<OpmlImportRow>('SELECT * FROM opml_imports WHERE id = $1 AND tenant_id = $2', [importId, tenantId])
-      : await executor.query<OpmlImportRow>('SELECT * FROM opml_imports WHERE id = $1', [importId]);
+  /**
+   * Tenant-scoped import lookup.
+   *
+   * TODO(tenant-isolation): make `tenantId` required and let the queue consumers call
+   * `findImportByIdForWorker` / `getImportOrThrowForWorker` explicitly. Blocked by three files
+   * outside this unit's edit scope, all of which call it with no tenant:
+   * `opml-imports/application/process-opml-parse-job.use-case.ts`,
+   * `opml-imports/application/process-opml-apply-job.use-case.ts` and
+   * `test/opml-workers.phase4.integration-spec.ts`. Until then an omitted tenant id is routed
+   * through the worker method, so the widening is explicit in one place rather than hidden in
+   * a SQL branch.
+   */
+  async findImportById(
+    importId: number,
+    tenantId?: string,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<OpmlImportSummary | null> {
+    return tenantId === undefined
+      ? this.findImportByIdForWorker(importId, executor)
+      : this.findImportByIdForTenant(importId, tenantId, executor);
+  }
+
+  /** Tenant-scoped import lookup with a REQUIRED tenant id. */
+  async findImportByIdForTenant(
+    importId: number,
+    tenantId: string,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<OpmlImportSummary | null> {
+    const result = await executor.query<OpmlImportRow>('SELECT * FROM opml_imports WHERE id = $1 AND tenant_id = $2', [
+      importId,
+      tenantId,
+    ]);
     return result.rows[0] ? mapImport(result.rows[0]) : null;
   }
 
-  async getImportOrThrow(importId: number, tenantId?: string, executor: QueryExecutor = this.databaseService): Promise<OpmlImportSummary> {
+  /**
+   * Deliberately cross-tenant import lookup for the OPML queue consumers, which receive a bare
+   * import id and read the tenant off the row. Never reachable from an HTTP handler. Grep for
+   * this name to enumerate every cross-tenant import read.
+   */
+  async findImportByIdForWorker(
+    importId: number,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<OpmlImportSummary | null> {
+    const result = await executor.query<OpmlImportRow>('SELECT * FROM opml_imports WHERE id = $1', [importId]);
+    return result.rows[0] ? mapImport(result.rows[0]) : null;
+  }
+
+  /** See the TODO on `findImportById`: same transitional optional-tenant surface. */
+  async getImportOrThrow(
+    importId: number,
+    tenantId?: string,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<OpmlImportSummary> {
     const found = await this.findImportById(importId, tenantId, executor);
+    if (!found) {
+      throw new NotFoundException('opml_import_not_found');
+    }
+
+    return found;
+  }
+
+  /** Tenant-scoped variant with a REQUIRED tenant id. */
+  async getImportOrThrowForTenant(
+    importId: number,
+    tenantId: string,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<OpmlImportSummary> {
+    const found = await this.findImportByIdForTenant(importId, tenantId, executor);
+    if (!found) {
+      throw new NotFoundException('opml_import_not_found');
+    }
+
+    return found;
+  }
+
+  /** Deliberately cross-tenant variant for the OPML queue consumers. */
+  async getImportOrThrowForWorker(
+    importId: number,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<OpmlImportSummary> {
+    const found = await this.findImportByIdForWorker(importId, executor);
     if (!found) {
       throw new NotFoundException('opml_import_not_found');
     }
@@ -163,7 +250,12 @@ export class OpmlImportsRepository {
       errorMessage?: string | null;
       confirmed?: boolean;
       completed?: boolean;
-      counters?: Partial<Pick<OpmlImportSummary, 'totalItems' | 'validItems' | 'duplicateItems' | 'existingItems' | 'invalidItems' | 'importedItems'>>;
+      counters?: Partial<
+        Pick<
+          OpmlImportSummary,
+          'totalItems' | 'validItems' | 'duplicateItems' | 'existingItems' | 'invalidItems' | 'importedItems'
+        >
+      >;
     },
     executor: QueryExecutor = this.databaseService,
   ): Promise<OpmlImportSummary> {
@@ -206,7 +298,11 @@ export class OpmlImportsRepository {
     return mapImport(result.rows[0]);
   }
 
-  async replaceImportItems(importId: number, items: OpmlImportItemInput[], executor: QueryExecutor = this.databaseService): Promise<void> {
+  async replaceImportItems(
+    importId: number,
+    items: OpmlImportItemInput[],
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<void> {
     const tenantId = await this.getImportTenantId(importId, executor);
     await executor.query('DELETE FROM opml_import_items WHERE import_id = $1', [importId]);
 
@@ -216,12 +312,35 @@ export class OpmlImportsRepository {
           INSERT INTO opml_import_items (tenant_id, import_id, title, outline_path, source_xml_url, normalized_url, normalized_url_hash, item_status, validation_error)
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `,
-        [tenantId, importId, item.title, item.outlinePath, item.sourceXmlUrl, item.normalizedUrl, item.normalizedUrlHash, item.itemStatus, item.validationError],
+        [
+          tenantId,
+          importId,
+          item.title,
+          item.outlinePath,
+          item.sourceXmlUrl,
+          item.normalizedUrl,
+          item.normalizedUrlHash,
+          item.itemStatus,
+          item.validationError,
+        ],
       );
     }
   }
 
-  async listPreviewItems(importId: number, page: number, pageSize: number): Promise<{ items: OpmlImportPreviewItem[]; total: number }> {
+  /**
+   * Item-level queries below key on `import_id` alone rather than on `tenant_id`.
+   *
+   * That is safe because `opml_import_items.import_id` is a FK onto `opml_imports`, whose
+   * ownership is already checked by `getImportOrThrowForTenant` before any of these run, and
+   * the DB assigns `opml_import_items.tenant_id` from the parent import. It is NOT safe to
+   * call any of them with an import id that has not first been resolved for the caller's
+   * tenant.
+   */
+  async listPreviewItems(
+    importId: number,
+    page: number,
+    pageSize: number,
+  ): Promise<{ items: OpmlImportPreviewItem[]; total: number }> {
     const offset = (page - 1) * pageSize;
     const [itemsResult, totalResult] = await Promise.all([
       this.databaseService.query<OpmlImportItemRow>(
@@ -234,7 +353,10 @@ export class OpmlImportsRepository {
         `,
         [importId, pageSize, offset],
       ),
-      this.databaseService.query<{ count: string }>('SELECT COUNT(*)::text AS count FROM opml_import_items WHERE import_id = $1', [importId]),
+      this.databaseService.query<{ count: string }>(
+        'SELECT COUNT(*)::text AS count FROM opml_import_items WHERE import_id = $1',
+        [importId],
+      ),
     ]);
 
     return {
@@ -243,7 +365,10 @@ export class OpmlImportsRepository {
     };
   }
 
-  async listNewCandidateItems(importId: number, executor: QueryExecutor = this.databaseService): Promise<OpmlImportPreviewItem[]> {
+  async listNewCandidateItems(
+    importId: number,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<OpmlImportPreviewItem[]> {
     const result = await executor.query<OpmlImportItemRow>(
       `
         SELECT id, title, outline_path, source_xml_url, normalized_url, item_status, validation_error, feed_id
@@ -257,7 +382,11 @@ export class OpmlImportsRepository {
     return result.rows.map(mapPreviewItem);
   }
 
-  async markItemImported(itemId: number, feedId: number, executor: QueryExecutor = this.databaseService): Promise<void> {
+  async markItemImported(
+    itemId: number,
+    feedId: number,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<void> {
     await executor.query(
       `
         UPDATE opml_import_items
@@ -270,7 +399,11 @@ export class OpmlImportsRepository {
     );
   }
 
-  async markItemFailed(itemId: number, validationError: string, executor: QueryExecutor = this.databaseService): Promise<void> {
+  async markItemFailed(
+    itemId: number,
+    validationError: string,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<void> {
     await executor.query(
       `
         UPDATE opml_import_items
@@ -283,7 +416,10 @@ export class OpmlImportsRepository {
     );
   }
 
-  async countItemsByStatus(importId: number, executor: QueryExecutor = this.databaseService): Promise<Record<string, number>> {
+  async countItemsByStatus(
+    importId: number,
+    executor: QueryExecutor = this.databaseService,
+  ): Promise<Record<string, number>> {
     const result = await executor.query<{ item_status: string; total: string }>(
       `
         SELECT item_status, COUNT(*)::text AS total

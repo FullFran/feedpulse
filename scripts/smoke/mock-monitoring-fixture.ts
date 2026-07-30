@@ -25,7 +25,13 @@ interface FixtureStats {
 const DEFAULT_FEED_KEY = 'smoke-default';
 
 function normalizeFeedKey(feedKey: string): string {
-  return feedKey.trim().replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || DEFAULT_FEED_KEY;
+  return (
+    feedKey
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || DEFAULT_FEED_KEY
+  );
 }
 
 function feedKeyFromPath(pathname: string): string | null {
@@ -33,12 +39,12 @@ function feedKeyFromPath(pathname: string): string | null {
     return DEFAULT_FEED_KEY;
   }
 
-  const match = /^\/feeds\/([^/]+)\/rss\.xml$/.exec(pathname);
-  if (!match) {
+  const rawFeedKey = /^\/feeds\/([^/]+)\/rss\.xml$/.exec(pathname)?.[1];
+  if (rawFeedKey === undefined) {
     return null;
   }
 
-  return normalizeFeedKey(decodeURIComponent(match[1]));
+  return normalizeFeedKey(decodeURIComponent(rawFeedKey));
 }
 
 function hashFeedKey(feedKey: string): number {
