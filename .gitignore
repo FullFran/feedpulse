@@ -33,3 +33,6 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Local agent tooling cache (machine-specific, never committed)
+.atl/

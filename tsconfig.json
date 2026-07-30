@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "node16",
     "declaration": false,
     "removeComments": true,
     "emitDecoratorMetadata": true,
@@ -11,13 +11,36 @@
     "outDir": "./dist",
     "baseUrl": "./",
     "incremental": true,
+    // Kept inside the (git- and docker-ignored) output directory so an
+    // incremental log never lands at the repository root. `npm run typecheck`
+    // passes `--incremental false` on purpose: an incremental --noEmit run can
+    // report a stale clean result after compilerOptions change, and a gate that
+    // can go green on stale data is not a gate.
+    "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
     "strict": true,
-    "noImplicitAny": true,
-    "strictNullChecks": true,
-    "moduleResolution": "node",
+    // Indexed reads (`rows[0]`, `match[1]`) are typed as possibly-undefined. The
+    // codebase reads a lot of SQL result rows and regex capture groups, and this
+    // is what turns "row is missing" into a compile error instead of a runtime
+    // `Cannot read properties of undefined`. Guard the read; do not silence it
+    // with `!` — `@typescript-eslint/no-unnecessary-type-assertion` is an error
+    // here, so an unnecessary assertion fails lint.
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "useUnknownInCatchVariables": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "moduleResolution": "node16",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["node", "jest"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  // `jest.config.ts` / `jest.*.config.ts` are deliberately NOT included.
+  // `jest.integration.config.ts` imports `./jest.unit.config.ts` WITH the file
+  // extension, which Jest's ESM config loader requires (verified: dropping it
+  // makes `jest --config jest.integration.config.ts` fail to resolve the
+  // module). Inside the tsc program that same import is TS5097, which can only
+  // be silenced with `allowImportingTsExtensions`, and that flag is illegal in
+  // any emitting project — including `tsconfig.build.json` and ts-jest.
+  // The Jest configs are linted by the syntactic ESLint block instead.
+  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"]
 }

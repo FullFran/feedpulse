@@ -1,0 +1,79 @@
+name: Bug report
+description: Something in FeedPulse behaves incorrectly.
+title: "fix: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please do **not** use this form for security
+        vulnerabilities — follow [SECURITY.md](https://github.com/FullFran/feedpulse/blob/main/SECURITY.md) instead.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened
+      description: Describe the incorrect behaviour and what you expected instead.
+      placeholder: |
+        A rule with two include keywords only fires when an entry contains both.
+        I expected either keyword to be enough.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that produces the problem. Include the request and response if it is an API issue.
+      placeholder: |
+        1. POST /api/v1/feeds with ...
+        2. POST /api/v1/rules with ...
+        3. POST /api/v1/feeds/:id/check-now
+        4. GET /api/v1/alerts returns an empty list
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - api runtime
+        - scheduler runtime
+        - worker runtime
+        - database / migrations
+        - operator dashboard
+        - notifications (webhook / email / Telegram)
+        - build, container or CI
+        - not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Commit or tag
+      description: Output of `git rev-parse --short HEAD`.
+      placeholder: 8d574f0
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Node version (`node --version`), how you run it (local processes or `docker compose`), and PostgreSQL version.
+      placeholder: |
+        Node v24.4.0, docker compose stack, PostgreSQL 16
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste log output or a stack trace. It is rendered as code, so no backticks are needed. Redact API keys and tokens first.
+      render: text
+    validations:
+      required: false

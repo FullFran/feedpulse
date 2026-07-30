@@ -1,3 +1,36 @@
+# Overrides layered on top of docker-compose.yml for the ephemeral smoke and
+# benchmark stacks (`npm run smoke:ci`, `npm run benchmark:*`).
+#
+# These are throwaway, network-isolated stacks driven by scripts/smoke and
+# scripts/benchmark, which call the API without credentials and register a feed
+# served from an internal Docker service name. The runtime posture below is
+# therefore deliberately relaxed and must never be copied into a real deployment.
+x-smoke-runtime-env: &smoke-runtime-env
+  WEBHOOK_NOTIFIER_URL: http://smoke-monitoring:4010/webhook
+  # The harness calls /api/ with no credential, so the stack runs in the
+  # documented single-tenant development mode. NODE_ENV must follow, because the
+  # env schema refuses to boot a production process with authentication disabled.
+  NODE_ENV: development
+  ENABLE_AUTH: "false"
+  # The fixture feed is http://smoke-monitoring:4010/rss.xml and the webhook is
+  # http://smoke-monitoring:4010/webhook - single-label internal hostnames, which
+  # the SSRF guard blocks by design.
+  ALLOW_PRIVATE_FEED_HOSTS: "true"
+  # scripts/smoke/run-stack-smoke.ts asserts /docs and /docs-json return 200.
+  ENABLE_SWAGGER: "true"
+  # Inbound rate limiting stays ENABLED (so the smoke run still proves the guard
+  # does not break ordinary traffic) but with ceilings the harness cannot reach.
+  # With ENABLE_AUTH=false every request resolves to the shared `legacy` tenant,
+  # so the whole run shares ONE bucket: scripts/benchmark/run-feed-capacity.ts
+  # registers up to 10000 feeds and calls check-now once per feed, which the
+  # production defaults (300 and 30 per minute) would reject long before the
+  # system under test was stressed.
+  RATE_LIMIT_MAX_REQUESTS: "1000000"
+  RATE_LIMIT_WRITE_MAX_REQUESTS: "1000000"
+  # 0 disables the per-tenant feed cap. The benchmark's 1000/5000/10000 stages
+  # all exceed the production default of 500 on purpose.
+  MAX_FEEDS_PER_TENANT: "0"
+
 services:
   smoke-monitoring:
     image: node:24-bookworm-slim
@@ -8,7 +41,7 @@ services:
     environment:
       SMOKE_MONITORING_PORT: 4010
     ports:
-      - '${SMOKE_MONITORING_PORT:-4010}:4010'
+      - "${SMOKE_MONITORING_PORT:-4010}:4010"
     healthcheck:
       test:
         [
@@ -23,14 +56,21 @@ services:
 
   api:
     environment:
-      WEBHOOK_NOTIFIER_URL: http://smoke-monitoring:4010/webhook
+      <<: *smoke-runtime-env
+    depends_on:
+      smoke-monitoring:
+        condition: service_healthy
+
+  scheduler:
+    environment:
+      <<: *smoke-runtime-env
     depends_on:
       smoke-monitoring:
         condition: service_healthy
 
   worker:
     environment:
-      WEBHOOK_NOTIFIER_URL: http://smoke-monitoring:4010/webhook
+      <<: *smoke-runtime-env
     depends_on:
       smoke-monitoring:
         condition: service_healthy

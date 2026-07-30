@@ -1,0 +1,19 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+artifacts/
+
+# Lockfiles are owned by the package manager
+package-lock.json
+
+# Agent and tooling scaffolding, not project source
+.agents/
+.atl/
+skills-lock.json
+
+# Vendored / hand-tuned assets that must not be reflowed
+public/dashboard/app.js
+
+# Generated documentation assets
+docs/**/*.html

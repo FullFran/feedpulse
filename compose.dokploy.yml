@@ -1,3 +1,13 @@
+# Dokploy deployment stack.
+#
+# Every application service sets `restart: unless-stopped`, so a container that
+# reports unhealthy too early would be restarted in a loop. The api command
+# chains `migrate.js && api.js`; `start_period` below is sized so a cold
+# migration run never counts against the retry budget.
+x-optional-env-file: &optional-env-file
+  - path: .env
+    required: false
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -7,7 +17,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-rss_monitor}']
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-rss_monitor}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -18,9 +28,9 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ['redis-server', '--appendonly', 'yes']
+    command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -31,8 +41,7 @@ services:
   api:
     build: .
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: *optional-env-file
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
@@ -43,48 +52,80 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Without this, Traefik routes traffic as soon as the container is running -
+    # which includes the whole window where migrate.js is still executing and
+    # nothing is listening on the port yet.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 120s
     expose:
-      - '3000'
+      - "${PORT:-3000}"
     networks:
       - default
       - dokploy-network
     labels:
       - traefik.enable=true
-      - traefik.http.routers.feedpulse-api.rule=Host(`feedpulse-rss-q2tykg-28f568-49-13-172-238.traefik.me`) || Host(`bah.blakia.es`)
+      # Set TRAEFIK_HOST to the domain this instance answers on. It was
+      # previously a hardcoded pair of hostnames belonging to one specific
+      # deployment, which made this file unusable as-is by anyone else and
+      # published that deployment's address in a public repository.
+      - traefik.http.routers.feedpulse-api.rule=Host(`${TRAEFIK_HOST:-feedpulse.localhost}`)
       - traefik.http.routers.feedpulse-api.entrypoints=web,websecure
       - traefik.http.routers.feedpulse-api.tls=true
       - traefik.http.routers.feedpulse-api.tls.certresolver=letsencrypt
-      - traefik.http.services.feedpulse-api.loadbalancer.server.port=3000
+      - traefik.http.services.feedpulse-api.loadbalancer.server.port=${PORT:-3000}
 
   scheduler:
     build: .
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: *optional-env-file
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
-    command: ['node', 'dist/main/scheduler.js']
+    command: ["node", "dist/main/scheduler.js"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # No HTTP surface; the image-level API probe would never pass here.
+    healthcheck:
+      disable: true
 
   worker:
     build: .
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: *optional-env-file
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
-    command: ['node', 'dist/main/worker.js']
+    command: ["node", "dist/main/worker.js"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:' + (process.env.WORKER_METRICS_PORT || 3001) + '/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
 
 volumes:
   postgres_data:

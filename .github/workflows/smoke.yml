@@ -1,31 +1,77 @@
 name: Smoke
 
+# Full-stack verification: Postgres + Redis + API + scheduler + worker brought
+# up with `docker compose`, then driven end to end by `scripts/smoke`.
+#
+# This is deliberately gated behind the fast quality gates. A lint or typecheck
+# failure now blocks smoke feedback; that is the intent, not a defect. Spending
+# minutes building images only to surface a one-character type error is exactly
+# the behaviour this replaces.
+#
+# The trigger surface is intentionally narrower than before: pull requests,
+# pushes to `main`, and manual dispatch. Every push on every topic branch no
+# longer rebuilds the whole stack.
+
 on:
   push:
+    branches:
+      - main
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
+  # Reuses `.github/workflows/ci.yml` verbatim instead of restating its steps.
+  # Cross-workflow `needs:` does not exist in GitHub Actions, so a reusable
+  # workflow call is the only way to express "smoke depends on quality".
+  quality:
+    name: Quality gates
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   smoke:
+    name: Docker stack smoke
+    needs: quality
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      # The api, scheduler and worker services share one build context and one
+      # Dockerfile. Routing compose through buildx bake collapses them into a
+      # single build instead of three identical ones.
+      COMPOSE_BAKE: "true"
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test
-
-      - name: Build application
-        run: npm run build
+      - name: Create .env placeholder for compose
+        # `docker-compose.yml` declares `env_file: - .env` for api, scheduler
+        # and worker, and `.env` is gitignored. Without this the stack cannot
+        # start on a fresh checkout: compose aborts with "env file ... not
+        # found" before it builds anything. The smoke overrides in
+        # `docker-compose.smoke.yml` supply every value the stack needs, so the
+        # file only has to exist.
+        run: touch .env
 
       - name: Start smoke stack
         run: npm run smoke:stack:up

@@ -1,0 +1,59 @@
+# Build context exclusions.
+#
+# The build stage does `COPY . .`, so anything not excluded here is uploaded to
+# the daemon and baked into an image layer. Two things matter most:
+#   1. Secrets: a developer `.env` is expected (docker-compose.yml uses env_file)
+#      and would otherwise survive inside the build layer forever.
+#   2. Size: node_modules/ and .git/ dominate the context and are rebuilt or
+#      irrelevant inside the image.
+#
+# Do NOT exclude db/, src/, public/, package.json or tsconfig*.json: the build
+# stage compiles src/, and the runtime stage copies db/ (migrations) and public/
+# (the dashboard served from process.cwd()/public/dashboard).
+
+# Secrets - never ship a local environment file into a layer.
+.env
+.env.*
+
+# Dependencies and build output are produced inside the image.
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Version control and CI metadata.
+.git/
+.gitignore
+.github/
+
+# Agent / tooling scratch directories.
+.agents/
+.atl/
+.vscode/
+.idea/
+
+# Test and coverage material is not part of the runtime image.
+test/
+coverage/
+artifacts/
+
+# Documentation is not served by the runtime.
+docs/
+*.md
+
+# Container definitions themselves never need to be inside the image.
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+compose.*.yml
+
+# Logs and OS noise.
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+*.temp

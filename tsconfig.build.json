@@ -1,7 +1,24 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "sourceMap": false
+    "sourceMap": false,
+    // Pinned explicitly. `tsconfig.json#include` now covers root-level
+    // `scripts/**` and `jest*.config.ts` so ESLint and `npm run typecheck` see
+    // them, but tsc infers `rootDir` from the common directory of the program.
+    // Without this pin the common root moves from `src/` to the repository
+    // root and the build emits `dist/src/main/api.js`, silently breaking the
+    // Dockerfile CMD (`node dist/main/api.js`) and docker-compose's
+    // `node dist/scripts/migrate.js`.
+    "rootDir": "./src",
+    // Pinned into the output directory. TypeScript places the incremental
+    // build log next to the config when the config lives outside `rootDir`,
+    // which is the case here — and a build log that survives `rm -rf dist`
+    // makes the next `npm run build` exit 0 while emitting nothing at all.
+    // Keeping it inside `dist/` ties its lifetime to the output it describes
+    // (and to the existing `dist/` entry in .gitignore and .dockerignore).
+    "tsBuildInfoFile": "./dist/tsconfig.build.tsbuildinfo"
   },
-  "exclude": ["test", "dist", "node_modules"]
+  // `scripts` and the jest configs are development tooling; they are run
+  // through `tsx`, never compiled into the production image.
+  "exclude": ["test", "dist", "node_modules", "scripts", "jest.config.ts", "jest.*.config.ts"]
 }

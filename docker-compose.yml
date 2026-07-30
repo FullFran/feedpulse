@@ -1,3 +1,16 @@
+# Local development stack.
+#
+# `.env` is intentionally optional: a fresh clone has no `.env` (it is
+# gitignored), and Compose hard-fails on a missing required env_file. The long
+# syntax below lets `docker compose up` work before `cp .env.example .env`,
+# while still layering the file in once it exists.
+x-optional-env-file: &optional-env-file
+  - path: .env
+    required: false
+
+# All application containers run from the same image, which ships a default
+# HEALTHCHECK against the API liveness endpoint. Every service that is not the
+# API therefore either overrides that probe or turns it off.
 services:
   postgres:
     image: postgres:16-alpine
@@ -6,9 +19,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - '${POSTGRES_HOST_PORT:-55432}:5432'
+      - "${POSTGRES_HOST_PORT:-55432}:5432"
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d rss_monitor']
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rss_monitor"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -18,17 +31,16 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - '${REDIS_HOST_PORT:-56379}:6379'
+      - "${REDIS_HOST_PORT:-56379}:6379"
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
       retries: 20
 
   api:
     build: .
-    env_file:
-      - .env
+    env_file: *optional-env-file
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
@@ -38,13 +50,26 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:' + (process.env.PORT || 3000) + '/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      # The api command chains `migrate.js && api.js`, so readiness must tolerate
+      # a full migration run before probes count against the retry budget.
+      start_period: 90s
     ports:
-      - '${API_HOST_PORT:-3000}:3000'
+      - "${API_HOST_PORT:-3000}:3000"
 
   scheduler:
     build: .
-    env_file:
-      - .env
+    env_file: *optional-env-file
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
@@ -54,11 +79,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # The scheduler has no HTTP surface, so the image-level API probe would
+    # report a permanently unhealthy container. Disable rather than fake it.
+    healthcheck:
+      disable: true
 
   worker:
     build: .
-    env_file:
-      - .env
+    env_file: *optional-env-file
     environment:
       DATABASE_URL: ${DOCKER_DATABASE_URL:-postgres://postgres:postgres@postgres:5432/rss_monitor}
       REDIS_URL: ${DOCKER_REDIS_URL:-redis://redis:6379}
@@ -68,8 +96,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # The worker only exposes the metrics server; /health there is unauthenticated
+    # by design (see src/main/worker-metrics-server.ts).
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:' + (process.env.WORKER_METRICS_PORT || 3001) + '/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     ports:
-      - '${WORKER_METRICS_HOST_PORT:-3001}:3001'
+      - "${WORKER_METRICS_HOST_PORT:-3001}:3001"
 
 volumes:
   postgres_data:
