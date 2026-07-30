@@ -1,0 +1,238 @@
+import { Injectable } from '@nestjs/common';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
+import { Pool } from 'pg';
+import { DatabaseService } from '../../infrastructure/persistence/database.service';
+
+/**
+ * Key format: `fp_<8-char prefix>_<43-char base64url secret>` (32 random bytes).
+ *
+ * The prefix is stored in clear text so an operator can identify a key in the UI or in logs
+ * without ever seeing the secret. Only `sha256(fullKey)` is persisted.
+ */
+export const API_KEY_NAMESPACE = 'fp';
+export const API_KEY_PREFIX_LENGTH = 8;
+export const API_KEY_SECRET_BYTES = 32;
+
+export interface ApiKeyRecord {
+  id: string;
+  tenantId: string;
+  prefix: string;
+  label: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface GeneratedApiKey {
+  plaintextKey: string;
+  prefix: string;
+  keyHash: string;
+}
+
+export interface CreatedApiKey {
+  /** Returned exactly once. It is not recoverable from the database afterwards. */
+  plaintextKey: string;
+  record: ApiKeyRecord;
+}
+
+interface ApiKeyRow {
+  id: string | number;
+  tenant_id: string;
+  key_hash: string;
+  prefix: string;
+  label: string | null;
+  created_at: Date | string;
+  last_used_at: Date | string | null;
+  revoked_at: Date | string | null;
+}
+
+function toIsoString(value: Date | string): string {
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
+function mapApiKey(row: ApiKeyRow): ApiKeyRecord {
+  return {
+    id: String(row.id),
+    tenantId: row.tenant_id,
+    prefix: row.prefix,
+    label: row.label,
+    createdAt: toIsoString(row.created_at),
+    lastUsedAt: row.last_used_at ? toIsoString(row.last_used_at) : null,
+    revokedAt: row.revoked_at ? toIsoString(row.revoked_at) : null,
+  };
+}
+
+export function hashApiKey(plaintextKey: string): string {
+  return createHash('sha256').update(plaintextKey, 'utf8').digest('hex');
+}
+
+export function generateApiKey(): GeneratedApiKey {
+  const prefix = randomBytes(API_KEY_PREFIX_LENGTH).toString('hex').slice(0, API_KEY_PREFIX_LENGTH);
+  const secret = randomBytes(API_KEY_SECRET_BYTES).toString('base64url');
+  const plaintextKey = `${API_KEY_NAMESPACE}_${prefix}_${secret}`;
+
+  return { plaintextKey, prefix, keyHash: hashApiKey(plaintextKey) };
+}
+
+/**
+ * Derives the display prefix of an arbitrary key string. Keys created before a format change
+ * (or seeded by hand) still need a non-null prefix column, so this never throws.
+ */
+export function extractApiKeyPrefix(plaintextKey: string): string {
+  const segments = plaintextKey.split('_');
+  const prefixSegment = segments[1];
+
+  if (
+    segments.length >= 3 &&
+    segments[0] === API_KEY_NAMESPACE &&
+    prefixSegment !== undefined &&
+    prefixSegment.length > 0
+  ) {
+    return prefixSegment.slice(0, API_KEY_PREFIX_LENGTH);
+  }
+
+  return plaintextKey.slice(0, API_KEY_PREFIX_LENGTH);
+}
+
+/**
+ * Constant-time comparison of two hex digests. A length mismatch short-circuits because
+ * `timingSafeEqual` throws on unequal buffer lengths.
+ */
+function hashesMatch(candidateHash: string, storedHash: string): boolean {
+  const candidate = Buffer.from(candidateHash, 'hex');
+  const stored = Buffer.from(storedHash, 'hex');
+
+  if (candidate.length === 0 || candidate.length !== stored.length) {
+    return false;
+  }
+
+  return timingSafeEqual(candidate, stored);
+}
+
+const SELECT_ACTIVE_BY_HASH = `
+  SELECT id, tenant_id, key_hash, prefix, label, created_at, last_used_at, revoked_at
+  FROM api_keys
+  WHERE key_hash = $1 AND revoked_at IS NULL
+`;
+
+@Injectable()
+export class ApiKeysRepository {
+  constructor(private readonly databaseService: DatabaseService) {}
+
+  async findActiveByHash(keyHash: string): Promise<(ApiKeyRecord & { keyHash: string }) | null> {
+    const result = await this.databaseService.query<ApiKeyRow>(SELECT_ACTIVE_BY_HASH, [keyHash]);
+    const row = result.rows[0];
+    return row ? { ...mapApiKey(row), keyHash: row.key_hash } : null;
+  }
+
+  /**
+   * Resolves a plaintext key to its stored record, or `null` when the key is unknown or revoked.
+   * Refreshes `last_used_at` on success without ever blocking or failing the caller.
+   */
+  async verifyApiKey(plaintextKey: string): Promise<ApiKeyRecord | null> {
+    const trimmed = plaintextKey.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const candidateHash = hashApiKey(trimmed);
+    const found = await this.findActiveByHash(candidateHash);
+    if (!found || !hashesMatch(candidateHash, found.keyHash)) {
+      return null;
+    }
+
+    void this.touchLastUsed(found.id);
+
+    const { keyHash: _keyHash, ...record } = found;
+    return record;
+  }
+
+  /** Fire-and-forget usage tracking: never rejects, never blocks the authenticated request. */
+  async touchLastUsed(id: string): Promise<void> {
+    try {
+      await this.databaseService.query('UPDATE api_keys SET last_used_at = NOW() WHERE id = $1', [id]);
+    } catch {
+      // Usage tracking is best-effort telemetry; a failure must not deny an otherwise valid key.
+    }
+  }
+
+  async create(input: { tenantId: string; label?: string | null }): Promise<CreatedApiKey> {
+    const generated = generateApiKey();
+    const result = await this.databaseService.query<ApiKeyRow>(
+      `
+        INSERT INTO api_keys (tenant_id, key_hash, prefix, label)
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, tenant_id, key_hash, prefix, label, created_at, last_used_at, revoked_at
+      `,
+      [input.tenantId, generated.keyHash, generated.prefix, input.label ?? null],
+    );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      // `INSERT ... RETURNING` always yields exactly one row. The guard is here
+      // so the impossible case fails loudly instead of handing the caller a
+      // plaintext key paired with an undefined record.
+      throw new Error('api_key_insert_returned_no_row');
+    }
+
+    return { plaintextKey: generated.plaintextKey, record: mapApiKey(row) };
+  }
+
+  async listByTenantId(tenantId: string): Promise<ApiKeyRecord[]> {
+    const result = await this.databaseService.query<ApiKeyRow>(
+      `
+        SELECT id, tenant_id, key_hash, prefix, label, created_at, last_used_at, revoked_at
+        FROM api_keys
+        WHERE tenant_id = $1
+        ORDER BY created_at DESC, id DESC
+      `,
+      [tenantId],
+    );
+
+    return result.rows.map(mapApiKey);
+  }
+
+  /** Returns `false` when the key does not exist or was already revoked. */
+  async revoke(id: string): Promise<boolean> {
+    const result = await this.databaseService.query<{ id: string | number }>(
+      'UPDATE api_keys SET revoked_at = NOW() WHERE id = $1 AND revoked_at IS NULL RETURNING id',
+      [id],
+    );
+
+    return (result.rowCount ?? 0) > 0;
+  }
+}
+
+/**
+ * Seeds a single well-known key at migrate time so `docker compose up` works out of the box.
+ * Idempotent: re-running with the same key is a no-op. Takes a raw pool because migrations run
+ * outside the Nest dependency injection container.
+ */
+export async function seedBootstrapApiKey(
+  pool: Pool,
+  input: { plaintextKey: string; tenantId: string; label?: string | null },
+): Promise<boolean> {
+  const trimmed = input.plaintextKey.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const keyHash = hashApiKey(trimmed);
+  const existing = await pool.query('SELECT id FROM api_keys WHERE key_hash = $1', [keyHash]);
+  if ((existing.rowCount ?? 0) > 0) {
+    return false;
+  }
+
+  const result = await pool.query(
+    `
+      INSERT INTO api_keys (tenant_id, key_hash, prefix, label)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (key_hash) DO NOTHING
+      RETURNING id
+    `,
+    [input.tenantId, keyHash, extractApiKeyPrefix(trimmed), input.label ?? 'bootstrap'],
+  );
+
+  return (result.rowCount ?? 0) > 0;
+}
