@@ -1,12 +1,10 @@
 import { Controller, Get, HttpCode, Param, ParseIntPipe, Post, Query, Req } from '@nestjs/common';
-import { Request } from 'express';
 import { ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
-
+import { Request } from 'express';
 import { paginatedResponse, successResponse } from '../../../shared/http/response';
 import { ApiEnvelopeResponse, ApiStandardErrorResponses } from '../../../shared/http/swagger';
 import { AlertDeliveryResultModel, AlertModel } from '../../../shared/http/swagger.models';
 import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context';
-
 import { DeliverAlertUseCase } from '../application/deliver-alert.use-case';
 import { GetAlertUseCase } from '../application/get-alert.use-case';
 import { ListAlertsUseCase } from '../application/list-alerts.use-case';
@@ -23,7 +21,12 @@ export class AlertsController {
 
   @Get()
   @ApiOperation({ summary: 'List persisted alerts with optional sent-state filter.' })
-  @ApiEnvelopeResponse(AlertModel, { status: 200, description: 'Alert list returned successfully.', isArray: true, paginated: true })
+  @ApiEnvelopeResponse(AlertModel, {
+    status: 200,
+    description: 'Alert list returned successfully.',
+    isArray: true,
+    paginated: true,
+  })
   @ApiStandardErrorResponses()
   async list(@Req() request: Request, @Query() query: ListAlertsQueryDto) {
     const tenantId = resolveTenantIdFromRequest(request);
@@ -51,7 +54,10 @@ export class AlertsController {
   @HttpCode(202)
   @ApiOperation({ summary: 'Queue an alert for delivery through the configured notifier.' })
   @ApiParam({ name: 'id', type: Number, example: 55 })
-  @ApiEnvelopeResponse(AlertDeliveryResultModel, { status: 202, description: 'Alert delivery was queued successfully.' })
+  @ApiEnvelopeResponse(AlertDeliveryResultModel, {
+    status: 202,
+    description: 'Alert delivery was queued successfully.',
+  })
   @ApiStandardErrorResponses()
   async send(@Req() request: Request, @Param('id', ParseIntPipe) id: number) {
     const tenantId = resolveTenantIdFromRequest(request);
