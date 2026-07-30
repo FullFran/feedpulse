@@ -1,143 +1,188 @@
-import { newDb } from 'pg-mem';
-
+import { Pool } from 'pg';
 import { AlertsRepository } from '../src/modules/alerts/alerts.repository';
+import { expectDefined } from './support/expect-defined';
+import { resetSchemaWithMigrations } from './support/schema';
 
-type Queryable = {
-  query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
-};
+/**
+ * These cases exercise `createForEntryWithRules` against the real schema,
+ * because the behaviour under test *is* SQL: `ON CONFLICT` inference over the
+ * expression index created by migration 0018, the `matched_rules` union, and the
+ * `xmax = 0` test that separates a genuinely new alert from one that only gained
+ * a rule. `pg-mem` implements none of those, so emulating them would only assert
+ * that the emulator matches itself.
+ *
+ * Point `TEST_DATABASE_URL` (or `DATABASE_URL`) at a throwaway Postgres 13+
+ * database to run them; the suite skips otherwise. The database is wiped: never
+ * aim it at anything you care about.
+ */
+const databaseUrl = process.env['TEST_DATABASE_URL'] ?? process.env['DATABASE_URL'] ?? '';
+const describeWithDatabase = databaseUrl ? describe : describe.skip;
 
-async function bootstrapSchema(pool: Queryable): Promise<void> {
-  await pool.query(`
-    CREATE TABLE entries (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
-      feed_id INT NOT NULL,
-      title TEXT,
-      link TEXT,
-      content_hash TEXT NOT NULL
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE rules (
-      id SERIAL PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      include_keywords TEXT[] NOT NULL,
-      exclude_keywords TEXT[] NOT NULL DEFAULT '{}'
-    )
-  `);
-
-  await pool.query(`
-    CREATE TABLE alerts (
-      id BIGSERIAL PRIMARY KEY,
-      tenant_id TEXT NOT NULL,
-      entry_id BIGINT NOT NULL REFERENCES entries(id),
-      rule_id INT NOT NULL REFERENCES rules(id),
-      canonical_link TEXT,
-      matched_rules INTEGER[] NOT NULL DEFAULT '{}',
-      webhook_delivery_status TEXT NOT NULL DEFAULT 'pending',
-      telegram_delivery_status TEXT NOT NULL DEFAULT 'pending',
-      email_delivery_status TEXT NOT NULL DEFAULT 'pending',
-      sent BOOLEAN NOT NULL DEFAULT FALSE,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (entry_id, rule_id)
-    )
-  `);
-
-  await pool.query(`
-    CREATE UNIQUE INDEX idx_alerts_tenant_rule_canonical_link_unique
-    ON alerts (tenant_id, rule_id, canonical_link)
-    WHERE canonical_link IS NOT NULL
-  `);
-}
-
-describe('AlertsRepository canonical-link dedupe', () => {
-  let pool: Queryable;
+describeWithDatabase('AlertsRepository.createForEntryWithRules canonical-link dedupe', () => {
+  let pool: Pool;
   let repository: AlertsRepository;
 
+  beforeAll(async () => {
+    pool = new Pool({ connectionString: databaseUrl });
+    await resetSchemaWithMigrations(pool, 'public');
+  }, 60_000);
+
+  afterAll(async () => {
+    await pool?.end();
+  });
+
   beforeEach(async () => {
-    const db = newDb({ autoCreateForeignKeyIndices: true });
-    const adapter = db.adapters.createPg();
-    pool = new adapter.Pool();
-    await bootstrapSchema(pool);
-
-    repository = new AlertsRepository({ query: pool.query.bind(pool) } as never);
-
+    await pool.query('TRUNCATE alerts, entries, rules, feeds RESTART IDENTITY CASCADE');
     await pool.query(`
-      INSERT INTO rules (id, tenant_id, name, include_keywords, exclude_keywords)
-      VALUES
-        (1, 'tenant_a', 'Rule A', ARRAY['ai'], ARRAY[]::text[]),
-        (2, 'tenant_a', 'Rule B', ARRAY['ai'], ARRAY[]::text[])
+      INSERT INTO feeds (id, tenant_id, url) VALUES
+        (1, 'tenant_a', 'https://newswire.example.com/rss'),
+        (2, 'tenant_a', 'https://aggregator.example.com/rss'),
+        (3, 'tenant_b', 'https://newswire.example.com/rss-b')
     `);
+    await pool.query(`
+      INSERT INTO rules (id, tenant_id, name, include_keywords) VALUES
+        (1, 'tenant_a', 'Rule A', ARRAY['ai']),
+        (2, 'tenant_a', 'Rule B', ARRAY['llm']),
+        (3, 'tenant_b', 'Rule C', ARRAY['ai'])
+    `);
+
+    repository = new AlertsRepository({
+      query: (text: string, values?: unknown[]) => pool.query(text, values),
+    } as never);
   });
 
-  it('creates a single alert for duplicate entries with same canonical link and same rule', async () => {
+  it('collapses two entries with the same canonical link into one alert carrying every rule', async () => {
     await pool.query(`
-      INSERT INTO entries (id, tenant_id, feed_id, title, link, content_hash)
-      VALUES
-        (101, 'tenant_a', 1, 'A', 'https://Example.com/articles/ai-news/#top', 'hash_101'),
-        (102, 'tenant_a', 2, 'B', 'https://example.com/articles/ai-news', 'hash_102')
+      INSERT INTO entries (id, tenant_id, feed_id, title, link, content_hash) VALUES
+        (101, 'tenant_a', 1, 'A', 'https://Example.com/articles/ai-news/?utm_source=newsletter#top', 'hash_101'),
+        (102, 'tenant_a', 2, 'B', 'https://example.com//articles/ai-news?fbclid=xyz', 'hash_102')
     `);
 
-    const created = await repository.createForMatches([
-      { entryId: '101', ruleId: 1 },
-      { entryId: '102', ruleId: 1 },
-    ]);
-
-    expect(created).toHaveLength(1);
-
-    const rows = await pool.query(`SELECT entry_id, rule_id, canonical_link FROM alerts ORDER BY id ASC`);
-    expect(rows.rows).toHaveLength(1);
-    expect(rows.rows[0]).toEqual(
-      expect.objectContaining({
-        entry_id: 101,
-        rule_id: 1,
-        canonical_link: 'https://example.com/articles/ai-news',
-      }),
+    const outcome = await repository.createForEntryWithRules(
+      new Map([
+        ['101', [1]],
+        ['102', [2]],
+      ]),
     );
+
+    expect(outcome.created).toHaveLength(1);
+    expect(outcome.ruleSetExtended).toHaveLength(0);
+
+    const rows = await pool.query('SELECT entry_id::text AS entry_id, matched_rules, canonical_link FROM alerts');
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]).toEqual({
+      entry_id: '101',
+      matched_rules: [1, 2],
+      canonical_link: 'https://example.com/articles/ai-news',
+    });
   });
 
-  it('allows the same canonical link to alert for different rules', async () => {
+  it('appends a rule to an existing alert without losing the previous ones and without re-delivering', async () => {
     await pool.query(`
-      INSERT INTO entries (id, tenant_id, feed_id, title, link, content_hash)
-      VALUES
+      INSERT INTO entries (id, tenant_id, feed_id, title, link, content_hash) VALUES
         (201, 'tenant_a', 1, 'A', 'https://example.com/articles/shared', 'hash_201'),
-        (202, 'tenant_a', 2, 'B', 'https://example.com/articles/shared/#dup', 'hash_202')
+        (202, 'tenant_a', 2, 'B', 'https://example.com/articles/shared/', 'hash_202')
     `);
 
-    const created = await repository.createForMatches([
-      { entryId: '201', ruleId: 1 },
-      { entryId: '202', ruleId: 2 },
-    ]);
+    const first = await repository.createForEntryWithRules(new Map([['201', [1]]]));
+    const second = await repository.createForEntryWithRules(new Map([['202', [2]]]));
 
-    expect(created).toHaveLength(2);
+    expect(first.created).toHaveLength(1);
+    expect(first.ruleSetExtended).toHaveLength(0);
 
-    const rows = await pool.query(`SELECT rule_id, canonical_link FROM alerts ORDER BY rule_id ASC`);
-    expect(rows.rows).toHaveLength(2);
-    expect(rows.rows[0]).toEqual(expect.objectContaining({ rule_id: 1, canonical_link: 'https://example.com/articles/shared' }));
-    expect(rows.rows[1]).toEqual(expect.objectContaining({ rule_id: 2, canonical_link: 'https://example.com/articles/shared' }));
+    // The second call must not report a new alert: the article was already
+    // delivered and only its rule set grew.
+    expect(second.created).toHaveLength(0);
+    expect(second.ruleSetExtended).toHaveLength(1);
+    expect(expectDefined(second.ruleSetExtended[0]).id).toBe(expectDefined(first.created[0]).id);
+
+    const rows = await pool.query('SELECT matched_rules FROM alerts');
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0].matched_rules).toEqual([1, 2]);
   });
 
-  it('falls back to per-entry dedupe when link is null or empty', async () => {
+  it('keeps the same canonical link separate across tenants', async () => {
     await pool.query(`
-      INSERT INTO entries (id, tenant_id, feed_id, title, link, content_hash)
-      VALUES
-        (301, 'tenant_a', 1, 'No Link', NULL, 'hash_301'),
-        (302, 'tenant_a', 2, 'Empty Link', '   ', 'hash_302')
+      INSERT INTO entries (id, tenant_id, feed_id, title, link, content_hash) VALUES
+        (301, 'tenant_a', 1, 'A', 'https://example.com/articles/shared', 'hash_301'),
+        (302, 'tenant_b', 3, 'B', 'https://example.com/articles/shared', 'hash_302')
     `);
 
-    const created = await repository.createForMatches([
-      { entryId: '301', ruleId: 1 },
-      { entryId: '302', ruleId: 1 },
-      { entryId: '301', ruleId: 1 },
+    const outcome = await repository.createForEntryWithRules(
+      new Map([
+        ['301', [1]],
+        ['302', [3]],
+      ]),
+    );
+
+    expect(outcome.created).toHaveLength(2);
+
+    const rows = await pool.query('SELECT tenant_id, canonical_link FROM alerts ORDER BY tenant_id');
+    expect(rows.rows).toEqual([
+      { tenant_id: 'tenant_a', canonical_link: 'https://example.com/articles/shared' },
+      { tenant_id: 'tenant_b', canonical_link: 'https://example.com/articles/shared' },
     ]);
+  });
 
-    expect(created).toHaveLength(2);
+  it('falls back to per-entry dedupe when the link is missing or blank', async () => {
+    await pool.query(`
+      INSERT INTO entries (id, tenant_id, feed_id, title, link, content_hash) VALUES
+        (401, 'tenant_a', 1, 'No link', NULL, 'hash_401'),
+        (402, 'tenant_a', 2, 'Blank link', '   ', 'hash_402')
+    `);
 
-    const rows = await pool.query(`SELECT entry_id, rule_id, canonical_link FROM alerts ORDER BY entry_id ASC`);
-    expect(rows.rows).toHaveLength(2);
-    expect(rows.rows[0]).toEqual(expect.objectContaining({ entry_id: 301, rule_id: 1, canonical_link: null }));
-    expect(rows.rows[1]).toEqual(expect.objectContaining({ entry_id: 302, rule_id: 1, canonical_link: null }));
+    const first = await repository.createForEntryWithRules(
+      new Map([
+        ['401', [1]],
+        ['402', [1]],
+      ]),
+    );
+
+    // Two link-less entries are two different articles: one alert each.
+    expect(first.created).toHaveLength(2);
+
+    // Re-alerting the same link-less entry must not create a second alert.
+    const second = await repository.createForEntryWithRules(new Map([['401', [2]]]));
+    expect(second.created).toHaveLength(0);
+    expect(second.ruleSetExtended).toHaveLength(1);
+
+    const rows = await pool.query(
+      'SELECT entry_id::text AS entry_id, matched_rules, canonical_link FROM alerts ORDER BY entry_id',
+    );
+    expect(rows.rows).toEqual([
+      { entry_id: '401', matched_rules: [1, 2], canonical_link: null },
+      { entry_id: '402', matched_rules: [1], canonical_link: null },
+    ]);
+  });
+
+  it('collapses entries that share a canonical link inside a single batch', async () => {
+    await pool.query(`
+      INSERT INTO entries (id, tenant_id, feed_id, title, link, content_hash) VALUES
+        (501, 'tenant_a', 1, 'A', 'https://example.com/articles/dup?utm_source=a', 'hash_501'),
+        (502, 'tenant_a', 1, 'B', 'https://example.com/articles/dup?utm_source=b', 'hash_502')
+    `);
+
+    // Postgres refuses an ON CONFLICT DO UPDATE that touches the same row twice
+    // in one statement, so the repository must merge these before writing.
+    const outcome = await repository.createForEntryWithRules(
+      new Map([
+        ['501', [1]],
+        ['502', [2]],
+      ]),
+    );
+
+    expect(outcome.created).toHaveLength(1);
+
+    const rows = await pool.query('SELECT matched_rules FROM alerts');
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0].matched_rules).toEqual([1, 2]);
+  });
+
+  it('returns nothing when no entry has matching rules', async () => {
+    await expect(repository.createForEntryWithRules(new Map())).resolves.toEqual({ created: [], ruleSetExtended: [] });
+    await expect(repository.createForEntryWithRules(new Map([['999', []]]))).resolves.toEqual({
+      created: [],
+      ruleSetExtended: [],
+    });
   });
 });

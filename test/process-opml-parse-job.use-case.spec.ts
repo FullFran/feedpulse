@@ -1,6 +1,7 @@
 import { ProcessOpmlParseJobUseCase } from '../src/modules/opml-imports/application/process-opml-parse-job.use-case';
 import { buildNormalizedFeedUrlHash, normalizeFeedUrl } from '../src/modules/opml-imports/domain/url-normalizer';
-import { OpmlImportItemInput } from '../src/modules/opml-imports/opml-imports.repository';
+import type { OpmlImportItemInput } from '../src/modules/opml-imports/opml-imports.repository';
+import { expectDefined } from './support/expect-defined';
 
 describe('ProcessOpmlParseJobUseCase', () => {
   it('clasifica entradas ya registradas como existing en preview', async () => {
@@ -14,7 +15,7 @@ describe('ProcessOpmlParseJobUseCase', () => {
     }));
 
     const opmlImportsRepository = {
-      getImportOrThrow: jest.fn().mockResolvedValue({ id: '1', status: 'uploaded' }),
+      getImportOrThrowForWorker: jest.fn().mockResolvedValue({ id: '1', status: 'uploaded' }),
       markImportStatus,
       replaceImportItems,
     };
@@ -63,10 +64,10 @@ describe('ProcessOpmlParseJobUseCase', () => {
     });
 
     expect(replaceImportItems).toHaveBeenCalledTimes(1);
-    const [, parsedItems] = replaceImportItems.mock.calls[0];
+    const [, parsedItems] = expectDefined(replaceImportItems.mock.calls[0]);
     expect(parsedItems).toHaveLength(1);
-    expect(parsedItems[0].itemStatus).toBe('existing');
-    expect(parsedItems[0].validationError).toBeNull();
+    expect(expectDefined(parsedItems[0]).itemStatus).toBe('existing');
+    expect(expectDefined(parsedItems[0]).validationError).toBeNull();
 
     const finalStatusCall = markImportStatus.mock.calls.find(([, input]) => input.status === 'preview_ready');
     expect(finalStatusCall).toBeDefined();

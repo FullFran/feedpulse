@@ -1,4 +1,5 @@
 import { extractOpmlItems } from '../src/modules/opml-imports/domain/opml-parser';
+import { expectDefined } from './support/expect-defined';
 
 describe('extractOpmlItems', () => {
   it('extracts xmlUrl entries and keeps folder path context', () => {
@@ -19,7 +20,7 @@ describe('extractOpmlItems', () => {
       outlinePath: 'Tech / AI Feed',
       sourceXmlUrl: 'https://example.com/ai.xml',
     });
-    expect(parsed[1].outlinePath).toBe('News');
+    expect(expectDefined(parsed[1]).outlinePath).toBe('News');
   });
 
   it('fails for malformed outline nesting', () => {
