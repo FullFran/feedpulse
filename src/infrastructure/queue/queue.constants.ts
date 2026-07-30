@@ -13,10 +13,23 @@ export interface FetchFeedJobData {
   feedId: number;
   queuedAt: string;
   attempt: number;
+  /**
+   * `scheduler` jobs share a stable, deduplicated job id (`feed-<id>`) so a tick can never
+   * queue the same feed twice. `manual` jobs get a unique id instead, so an operator check
+   * is never silently swallowed by deduplication against a scheduled job.
+   * Defaults to `scheduler` when omitted.
+   */
+  source?: 'scheduler' | 'manual';
+}
+
+export interface FetchFeedEnqueueResult {
+  jobId: string;
+  /** True when the queue already held a job with this id, so nothing new was enqueued. */
+  deduplicated: boolean;
 }
 
 export interface FetchFeedQueuePort {
-  enqueue(job: FetchFeedJobData): Promise<void>;
+  enqueue(job: FetchFeedJobData): Promise<FetchFeedEnqueueResult>;
 }
 
 export interface AlertDeliveryJobData {

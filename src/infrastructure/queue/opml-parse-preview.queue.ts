@@ -1,14 +1,8 @@
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Job, Queue, Worker } from 'bullmq';
-
 import { AppConfigService } from '../../shared/config/app-config.service';
-
 import { buildQueueJobId } from './job-id';
-import {
-  OPML_PARSE_PREVIEW_QUEUE_NAME,
-  OpmlParsePreviewJobData,
-  OpmlParsePreviewQueuePort,
-} from './queue.constants';
+import { OPML_PARSE_PREVIEW_QUEUE_NAME, OpmlParsePreviewJobData, OpmlParsePreviewQueuePort } from './queue.constants';
 
 @Injectable()
 export class OpmlParsePreviewQueue implements OpmlParsePreviewQueuePort, OnApplicationShutdown {
@@ -27,7 +21,9 @@ export class OpmlParsePreviewQueue implements OpmlParsePreviewQueuePort, OnAppli
           type: 'exponential',
           delay: 1000,
         },
-        removeOnComplete: 100,
+        // Deterministic jobId (`opml-parse-<importId>`) collides with retained completed jobs:
+        // re-enqueue becomes a silent no-op, leaving the import stuck until retention evicts the old job.
+        removeOnComplete: true,
         removeOnFail: 100,
       },
     });
@@ -39,7 +35,9 @@ export class OpmlParsePreviewQueue implements OpmlParsePreviewQueuePort, OnAppli
     });
   }
 
-  createWorker(processor: (job: Job<OpmlParsePreviewJobData, void, string>) => Promise<void>): Worker<OpmlParsePreviewJobData, void, string> {
+  createWorker(
+    processor: (job: Job<OpmlParsePreviewJobData, void, string>) => Promise<void>,
+  ): Worker<OpmlParsePreviewJobData, void, string> {
     return new Worker<OpmlParsePreviewJobData, void, string>(
       OPML_PARSE_PREVIEW_QUEUE_NAME,
       async (job) => processor(job),

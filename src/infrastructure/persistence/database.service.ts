@@ -1,6 +1,5 @@
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Pool, QueryResult, QueryResultRow } from 'pg';
-
 import { DATABASE_POOL } from './database.constants';
 
 @Injectable()

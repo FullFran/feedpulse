@@ -1,5 +1,4 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-
 import { RulesRepository } from '../rules.repository';
 
 @Injectable()

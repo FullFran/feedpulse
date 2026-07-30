@@ -1,10 +1,8 @@
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Job, Queue, Worker } from 'bullmq';
-
 import { AppConfigService } from '../../shared/config/app-config.service';
-
-import { ALERT_DELIVERY_QUEUE_NAME, AlertDeliveryJobData, AlertDeliveryQueuePort } from './queue.constants';
 import { buildQueueJobId } from './job-id';
+import { ALERT_DELIVERY_QUEUE_NAME, AlertDeliveryJobData, AlertDeliveryQueuePort } from './queue.constants';
 
 @Injectable()
 export class AlertDeliveryQueue implements AlertDeliveryQueuePort, OnApplicationShutdown {
@@ -23,7 +21,9 @@ export class AlertDeliveryQueue implements AlertDeliveryQueuePort, OnApplication
           type: 'exponential',
           delay: 2000,
         },
-        removeOnComplete: 100,
+        // Deterministic jobId (`alert-<id>`) collides with retained completed jobs:
+        // re-enqueue becomes a silent no-op, leaving alerts undelivered until retention evicts the old job.
+        removeOnComplete: true,
         removeOnFail: 100,
       },
     });
@@ -35,15 +35,13 @@ export class AlertDeliveryQueue implements AlertDeliveryQueuePort, OnApplication
     });
   }
 
-  createWorker(processor: (job: Job<AlertDeliveryJobData, void, string>) => Promise<void>): Worker<AlertDeliveryJobData, void, string> {
-    return new Worker<AlertDeliveryJobData, void, string>(
-      ALERT_DELIVERY_QUEUE_NAME,
-      async (job) => processor(job),
-      {
-        connection: this.connection,
-        concurrency: Math.max(1, Math.min(this.configService.workerConcurrency, 3)),
-      },
-    );
+  createWorker(
+    processor: (job: Job<AlertDeliveryJobData, void, string>) => Promise<void>,
+  ): Worker<AlertDeliveryJobData, void, string> {
+    return new Worker<AlertDeliveryJobData, void, string>(ALERT_DELIVERY_QUEUE_NAME, async (job) => processor(job), {
+      connection: this.connection,
+      concurrency: Math.max(1, Math.min(this.configService.workerConcurrency, 3)),
+    });
   }
 
   async onApplicationShutdown(): Promise<void> {

@@ -1,14 +1,11 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Module, OnApplicationShutdown } from '@nestjs/common';
 import IORedis from 'ioredis';
-
 import { AppConfigModule } from '../../shared/config/app-config.module';
 import { AppConfigService } from '../../shared/config/app-config.service';
-
 import { AlertDeliveryQueue } from './alert-delivery.queue';
+import { FetchFeedQueue } from './fetch-feed.queue';
 import { OpmlApplyImportQueue } from './opml-apply-import.queue';
 import { OpmlParsePreviewQueue } from './opml-parse-preview.queue';
-
-import { FetchFeedQueue } from './fetch-feed.queue';
 import {
   ALERT_DELIVERY_QUEUE_TOKEN,
   FETCH_FEED_QUEUE_TOKEN,
@@ -17,6 +14,31 @@ import {
   REDIS_CONNECTION,
 } from './queue.constants';
 
+/**
+ * The shared connection every BullMQ queue and worker rides on.
+ *
+ * Nest only invokes lifecycle hooks on the object a factory returns, and an
+ * `IORedis` instance has none of its own. Without this hook the socket outlives
+ * `app.close()` and keeps the event loop alive indefinitely, so every SIGTERM
+ * ended at the `SHUTDOWN_TIMEOUT_MS` force-exit deadline with exit code 1 —
+ * which an orchestrator reads as a crashed container on every rolling restart.
+ */
+function createRedisConnection(redisUrl: string): IORedis & OnApplicationShutdown {
+  const connection = new IORedis(redisUrl, { maxRetriesPerRequest: null });
+
+  return Object.assign(connection, {
+    async onApplicationShutdown(): Promise<void> {
+      try {
+        await connection.quit();
+      } catch {
+        // `quit` rejects when the connection is already gone or mid-reconnect;
+        // tear the socket down regardless so the process can exit.
+        connection.disconnect();
+      }
+    },
+  });
+}
+
 @Global()
 @Module({
   imports: [AppConfigModule],
@@ -24,7 +46,7 @@ import {
     {
       provide: REDIS_CONNECTION,
       inject: [AppConfigService],
-      useFactory: (configService: AppConfigService) => new IORedis(configService.redisUrl, { maxRetriesPerRequest: null }),
+      useFactory: (configService: AppConfigService) => createRedisConnection(configService.redisUrl),
     },
     AlertDeliveryQueue,
     FetchFeedQueue,

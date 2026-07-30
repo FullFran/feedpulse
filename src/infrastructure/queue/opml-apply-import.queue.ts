@@ -1,14 +1,8 @@
 import { Inject, Injectable, OnApplicationShutdown } from '@nestjs/common';
 import { Job, Queue, Worker } from 'bullmq';
-
 import { AppConfigService } from '../../shared/config/app-config.service';
-
 import { buildQueueJobId } from './job-id';
-import {
-  OPML_APPLY_IMPORT_QUEUE_NAME,
-  OpmlApplyImportJobData,
-  OpmlApplyImportQueuePort,
-} from './queue.constants';
+import { OPML_APPLY_IMPORT_QUEUE_NAME, OpmlApplyImportJobData, OpmlApplyImportQueuePort } from './queue.constants';
 
 @Injectable()
 export class OpmlApplyImportQueue implements OpmlApplyImportQueuePort, OnApplicationShutdown {
@@ -27,7 +21,9 @@ export class OpmlApplyImportQueue implements OpmlApplyImportQueuePort, OnApplica
           type: 'exponential',
           delay: 2000,
         },
-        removeOnComplete: 100,
+        // Deterministic jobId (`opml-apply-<importId>`) collides with retained completed jobs:
+        // re-enqueue becomes a silent no-op, leaving the import stuck until retention evicts the old job.
+        removeOnComplete: true,
         removeOnFail: 100,
       },
     });
@@ -39,7 +35,9 @@ export class OpmlApplyImportQueue implements OpmlApplyImportQueuePort, OnApplica
     });
   }
 
-  createWorker(processor: (job: Job<OpmlApplyImportJobData, void, string>) => Promise<void>): Worker<OpmlApplyImportJobData, void, string> {
+  createWorker(
+    processor: (job: Job<OpmlApplyImportJobData, void, string>) => Promise<void>,
+  ): Worker<OpmlApplyImportJobData, void, string> {
     return new Worker<OpmlApplyImportJobData, void, string>(
       OPML_APPLY_IMPORT_QUEUE_NAME,
       async (job) => processor(job),
