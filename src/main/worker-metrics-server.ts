@@ -41,8 +41,17 @@ function isAuthorized(req: IncomingMessage, expectedToken: string): boolean {
     return false;
   }
 
-  const token = /^Bearer\s+(.+)$/i.exec(header.trim())?.[1];
-  if (token === undefined) {
+  // Parsed by slicing, not by regex. `/^Bearer\s+(.+)$/i` backtracks between
+  // `\s+` and `.+` (both match a space), so an attacker-supplied header of
+  // "bearer " followed by many spaces costs polynomial time on an endpoint that
+  // is reachable before the token is ever checked.
+  const trimmed = header.trim();
+  if (!trimmed.toLowerCase().startsWith('bearer ')) {
+    return false;
+  }
+
+  const token = trimmed.slice('bearer '.length).trim();
+  if (token.length === 0) {
     return false;
   }
 

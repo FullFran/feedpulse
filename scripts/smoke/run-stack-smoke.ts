@@ -161,7 +161,10 @@ async function probeEndpoints(): Promise<Record<string, unknown>> {
   }
 
   const dashboard = await request(`${apiBaseUrl}/dashboard/`);
-  if (dashboard.status !== 200 || !dashboard.bodyText.includes('RSS Monitor Dashboard')) {
+  // Matches the <title> in public/dashboard/index.html. Keep the two in sync:
+  // the dashboard was renamed once without updating this probe, and the smoke
+  // job was the only thing that caught it.
+  if (dashboard.status !== 200 || !dashboard.bodyText.includes('FeedPulse — Operator Dashboard')) {
     throw new Error('Dashboard index did not contain the expected title');
   }
 

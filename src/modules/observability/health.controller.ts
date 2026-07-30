@@ -51,8 +51,16 @@ function extractBearerToken(request: Pick<Request, 'headers'>): string {
     return '';
   }
 
-  const token = /^Bearer\s+(.+)$/i.exec(header.trim())?.[1];
-  return token !== undefined ? token.trim() : '';
+  // Parsed by slicing, not by regex. `/^Bearer\s+(.+)$/i` backtracks between
+  // `\s+` and `.+` (both match a space), so an attacker-supplied header of
+  // "bearer " followed by many spaces costs polynomial time on an endpoint that
+  // is reachable before the token is ever checked.
+  const trimmed = header.trim();
+  if (!trimmed.toLowerCase().startsWith('bearer ')) {
+    return '';
+  }
+
+  return trimmed.slice('bearer '.length).trim();
 }
 
 function tokensMatch(provided: string, expected: string): boolean {

@@ -71,6 +71,12 @@ export async function safeFetch(
   let currentInit: RequestInit = { ...init, redirect: 'manual' };
 
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    // CodeQL reports `js/request-forgery` here. It is a false positive on the
+    // SSRF guard itself: `currentUrl` is only ever assigned from
+    // `assertSafePublicUrl`, above for the first hop and below for every
+    // redirect target, so the value reaching `fetchImpl` has always been
+    // validated. CodeQL cannot model a project-defined sanitizer without a
+    // custom query pack, so it treats the URL as still tainted.
     const response = await fetchImpl(currentUrl.toString(), currentInit);
 
     if (!REDIRECT_STATUSES.has(response.status)) {
