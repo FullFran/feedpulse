@@ -1,5 +1,5 @@
-import { IsIn, IsInt, IsOptional, IsUrl, Max, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsIn, IsInt, IsOptional, IsUrl, Max, Min } from 'class-validator';
 
 export class CreateFeedDto {
   @ApiProperty({ example: 'https://example.com/rss.xml' })

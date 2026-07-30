@@ -1,18 +1,18 @@
-import { createHash } from 'node:crypto';
-
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import Parser from 'rss-parser';
-
 import { DatabaseService } from '../../../infrastructure/persistence/database.service';
 import { ReadinessService } from '../../../infrastructure/persistence/readiness.service';
 import { AppConfigService } from '../../../shared/config/app-config.service';
-import { MetricsService } from '../../observability/metrics.service';
-import { DeliverAlertUseCase } from '../../alerts/application/deliver-alert.use-case';
+import { normalizeSearchText } from '../../../shared/text/normalize-search-text';
 import { AlertsRepository } from '../../alerts/alerts.repository';
+import { DeliverAlertUseCase } from '../../alerts/application/deliver-alert.use-case';
 import { EntriesRepository } from '../../entries/entries.repository';
 import { FeedsRepository } from '../../feeds/feeds.repository';
+import { MetricsService } from '../../observability/metrics.service';
 import { RulesRepository } from '../../rules/rules.repository';
 import { FEED_FETCHER, FeedFetcherPort } from '../domain/feed-fetcher.port';
+import { ruleMatchesNormalizedText } from '../domain/keyword-match';
 
 const AUTO_PAUSED_ERROR_PREFIX = 'auto-paused:';
 const DNS_AUTO_PAUSE_DELAY_SECONDS = 12 * 60 * 60;
@@ -34,41 +34,54 @@ interface FeedFailureClassification {
   shouldRethrow: boolean;
 }
 
-function normalizeSearchText(value: string): string {
-  return value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .trim();
+/**
+ * Normalize a feed timestamp to a stable UTC ISO-8601 instant.
+ *
+ * Feeds report `pubDate` in half a dozen formats, and the raw string used to
+ * feed the content hash directly. Normalizing first makes the hash reproducible
+ * from the stored `published_at` column, which is what lets migration 0017
+ * recompute it in SQL. Unparseable timestamps become null rather than being
+ * handed to Postgres as garbage.
+ */
+function normalizePublishedAt(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 /**
- * Check if phrase matches at word boundaries only.
- * - "okupa" should NOT match "okupacion" (contains)
- * - "ocupacion de una vivienda" should match exact phrase (contiguous)
- * Uses word boundary markers to ensure phrase does not appear inside larger words.
+ * Coerce whatever `rss-parser` produced for `<guid>` into a usable string.
+ *
+ * `rss-parser` yields a plain string for a bare element, but an object of the
+ * shape `{ _: 'value', $: { isPermaLink: 'false' } }` when the element carries
+ * XML attributes — and `<guid isPermaLink="false">` is extremely common. A bare
+ * `String(...)` on that object returns the literal `'[object Object]'`, which
+ * is truthy, so it would win over the item link and hand every item in the feed
+ * the same guid. Unwrapping the text node fixes the common case; anything with
+ * no meaningful string form becomes null so the caller falls back to the link.
  */
-function containsNormalizedPhrase(haystack: string, phrase: string): boolean {
-  const normalizedPhrase = normalizeSearchText(phrase);
-
-  if (!normalizedPhrase) {
-    return false;
+function normalizeRawGuid(rawGuid: unknown): string | null {
+  if (typeof rawGuid === 'string') {
+    return rawGuid;
   }
 
-  // For single-word phrases, use word boundary matching
-  // by surrounding with delimiters and checking for word boundaries
-  if (!normalizedPhrase.includes(' ')) {
-    // Use regex with word boundaries (\b) for single words
-    // Escape special regex characters first
-    const escaped = normalizedPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`\\b${escaped}\\b`, 'u');
-    return regex.test(haystack);
+  if (rawGuid === null || rawGuid === undefined) {
+    return null;
   }
 
-  // For multi-word phrases, require exact contiguous match
-  // but also ensure it's not a substring of a larger word
-  return haystack.includes(normalizedPhrase);
+  if (typeof rawGuid === 'number' || typeof rawGuid === 'bigint' || typeof rawGuid === 'boolean') {
+    return String(rawGuid);
+  }
+
+  if (typeof rawGuid === 'object' && '_' in rawGuid) {
+    const textNode: unknown = rawGuid._;
+    return typeof textNode === 'string' ? textNode : null;
+  }
+
+  return null;
 }
 
 @Injectable()
@@ -89,9 +102,15 @@ export class ProcessFeedJobUseCase {
     @Inject(FEED_FETCHER) private readonly feedFetcher: FeedFetcherPort,
   ) {}
 
-  async execute(job: { feedId: number }): Promise<{ insertedEntries: number; createdAlerts: number; statusCode: number }> {
+  async execute(job: {
+    feedId: number;
+  }): Promise<{ insertedEntries: number; createdAlerts: number; statusCode: number }> {
     await this.readinessService.assertSchemaReady();
-    const feed = await this.feedsRepository.findById(job.feedId);
+    // Deliberately cross-tenant: the scheduler hands this worker a bare feed id and the tenant
+    // is only known once the row is read. Named `...ForWorker` so `rg 'ForWorker'` enumerates
+    // every cross-tenant read in the application. Every subsequent query in this method is
+    // scoped by `feed.tenantId`, which is the value that row carries.
+    const feed = await this.feedsRepository.findByIdForWorker(job.feedId);
 
     if (!feed) {
       throw new NotFoundException('feed_not_found');
@@ -129,14 +148,18 @@ export class ProcessFeedJobUseCase {
       const parsed = await this.parser.parseString(response.body);
       const normalizedEntries = parsed.items.map((item) => {
         const rawGuid = (item as { guid?: unknown }).guid;
-        const guidValue = typeof rawGuid === 'string' ? rawGuid : rawGuid == null ? null : String(rawGuid);
+        const guidValue = normalizeRawGuid(rawGuid);
         const title = item.title?.trim() ?? null;
         const link = item.link?.trim() ?? null;
         const guid = guidValue?.trim() || link || null;
         const content = item.contentSnippet?.trim() ?? item.content?.trim() ?? null;
-        const publishedAt = item.isoDate ?? item.pubDate ?? null;
+        const publishedAt = normalizePublishedAt(item.isoDate ?? item.pubDate ?? null);
+        // Identity of an article is link + guid + publication instant. The title
+        // is deliberately excluded: publishers revise headlines after
+        // publication, and hashing the title turned every revision into a new
+        // entry and therefore a duplicate alert for the same article.
         const contentHash = createHash('sha256')
-          .update(`${title ?? ''}|${link ?? ''}|${publishedAt ?? ''}`)
+          .update(`${link ?? ''}|${guid ?? ''}|${publishedAt ?? ''}`)
           .digest('hex');
 
         return { title, link, guid, content, publishedAt, contentHash };
@@ -145,7 +168,12 @@ export class ProcessFeedJobUseCase {
       const client = await this.databaseService.getPool().connect();
       try {
         await client.query('BEGIN');
-        const insertedEntries = await this.entriesRepository.insertMany(feed.tenantId, feed.id, normalizedEntries, client);
+        const insertedEntries = await this.entriesRepository.insertMany(
+          feed.tenantId,
+          feed.id,
+          normalizedEntries,
+          client,
+        );
         const activeRules = await this.rulesRepository.listActive(feed.tenantId);
 
         // Find matching entries and aggregate rules - ONE alert per article (not one per rule)
@@ -153,13 +181,8 @@ export class ProcessFeedJobUseCase {
 
         for (const entry of insertedEntries) {
           const haystack = normalizeSearchText(`${entry.title ?? ''} ${entry.content ?? ''}`);
-
           const matchingRuleIds = activeRules
-            .filter((rule) => {
-              const includes = rule.includeKeywords.every((keyword) => containsNormalizedPhrase(haystack, keyword));
-              const excludes = rule.excludeKeywords.some((keyword) => containsNormalizedPhrase(haystack, keyword));
-              return includes && !excludes;
-            })
+            .filter((rule) => ruleMatchesNormalizedText(haystack, rule))
             .map((rule) => rule.id);
 
           if (matchingRuleIds.length > 0) {
@@ -168,8 +191,16 @@ export class ProcessFeedJobUseCase {
         }
 
         // Now create alerts with all matching rules for each entry
-        const createdAlerts = await this.alertsRepository.createForEntryWithRules(matchesByEntry, client);
-        await this.recordFetchLog(feed.id, feed.tenantId, response.statusCode, response.durationMs, false, null, client);
+        const alertOutcome = await this.alertsRepository.createForEntryWithRules(matchesByEntry, client);
+        await this.recordFetchLog(
+          feed.id,
+          feed.tenantId,
+          response.statusCode,
+          response.durationMs,
+          false,
+          null,
+          client,
+        );
 
         await this.feedsRepository.updateAfterFetch({
           feedId: feed.id,
@@ -186,10 +217,25 @@ export class ProcessFeedJobUseCase {
         await client.query('COMMIT');
 
         this.metricsService.incrementEntriesInserted(insertedEntries.length);
-        this.metricsService.incrementAlertsGenerated(createdAlerts.length);
-        await this.deliverAlerts(createdAlerts.map((alert) => Number(alert.id)));
+        this.metricsService.incrementAlertsGenerated(alertOutcome.created.length);
 
-        return { insertedEntries: insertedEntries.length, createdAlerts: createdAlerts.length, statusCode: response.statusCode };
+        if (alertOutcome.ruleSetExtended.length > 0) {
+          // Surfaced rather than swallowed: these articles were already
+          // delivered, so a newly matching rule updates matched_rules without
+          // sending the reader the same article twice.
+          this.logger.log(
+            `Feed ${feed.id}: ${alertOutcome.ruleSetExtended.length} existing alert(s) gained rules without re-delivery ` +
+              `(alert ids: ${alertOutcome.ruleSetExtended.map((alert) => alert.id).join(', ')})`,
+          );
+        }
+
+        await this.deliverAlerts(alertOutcome.created.map((alert) => Number(alert.id)));
+
+        return {
+          insertedEntries: insertedEntries.length,
+          createdAlerts: alertOutcome.created.length,
+          statusCode: response.statusCode,
+        };
       } catch (error) {
         await client.query('ROLLBACK');
         throw error;
@@ -232,7 +278,11 @@ export class ProcessFeedJobUseCase {
     return baseDelaySeconds + jitter;
   }
 
-  private classifyFeedFailure(message: string, errorCount: number, pollIntervalSeconds: number): FeedFailureClassification {
+  private classifyFeedFailure(
+    message: string,
+    errorCount: number,
+    pollIntervalSeconds: number,
+  ): FeedFailureClassification {
     const category = this.detectFeedFailureCategory(message, errorCount);
 
     if (category === 'auto_paused_dns') {
@@ -279,7 +329,19 @@ export class ProcessFeedJobUseCase {
     const http404 = normalized.includes('status 404');
     const http410 = normalized.includes('status 410');
     const unsupported = normalized.includes('feed not recognized as rss');
-    const hardXml = normalized.includes('unable to parse xml') || normalized.includes('invalid character in') || normalized.includes('attribute without value');
+    const hardXml =
+      normalized.includes('unable to parse xml') ||
+      normalized.includes('invalid character in') ||
+      normalized.includes('attribute without value');
+    // The SSRF guard rejects a feed whose URL — or any redirect hop of it — resolves
+    // into loopback/RFC1918/link-local space, or whose scheme is not http(s). That
+    // never becomes valid on its own, and an oversized body is not transient either,
+    // so both auto-pause instead of retrying forever.
+    const unsafeTarget =
+      normalized.includes('unsafe_host') ||
+      normalized.includes('unsafe_protocol') ||
+      normalized.includes('feed_url_host_not_allowed');
+    const oversizedBody = normalized.includes('feed_body_too_large');
     const repeatedlyForbidden = normalized.includes('status 403') && errorCount >= 5;
     const dnsResolutionFailure = this.isDnsResolutionFailure(normalized) && errorCount >= 3;
 
@@ -287,7 +349,7 @@ export class ProcessFeedJobUseCase {
       return 'terminal_not_found';
     }
 
-    if (unsupported) {
+    if (unsupported || unsafeTarget || oversizedBody) {
       return 'terminal_invalid_feed';
     }
 
@@ -317,8 +379,8 @@ export class ProcessFeedJobUseCase {
   private async deliverAlerts(alertIds: number[]): Promise<void> {
     for (const alertId of alertIds) {
       try {
-          await this.deliverAlertUseCase.execute(alertId, 'ingestion');
-        } catch (error) {
+        await this.deliverAlertUseCase.execute(alertId, 'ingestion');
+      } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown alert delivery failure';
         this.logger.warn(`Alert ${alertId} delivery skipped: ${message}`);
       }
@@ -332,7 +394,7 @@ export class ProcessFeedJobUseCase {
     responseTimeMs: number | null,
     error: boolean,
     errorMessage: string | null,
-      client?: Pick<DatabaseService, 'query'>,
+    client?: Pick<DatabaseService, 'query'>,
   ): Promise<void> {
     const executor = client ?? this.databaseService;
     await executor.query(

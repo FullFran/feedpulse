@@ -1,6 +1,6 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
-import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class ListFeedsQueryDto {
   @ApiPropertyOptional({ enum: ['active', 'paused', 'error'], example: 'active' })

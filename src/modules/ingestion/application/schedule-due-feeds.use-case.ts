@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-
 import { ReadinessService } from '../../../infrastructure/persistence/readiness.service';
 import { FETCH_FEED_QUEUE_TOKEN, FetchFeedQueuePort } from '../../../infrastructure/queue/queue.constants';
 import { AppConfigService } from '../../../shared/config/app-config.service';
@@ -14,21 +13,26 @@ export class ScheduleDueFeedsUseCase {
     @Inject(FETCH_FEED_QUEUE_TOKEN) private readonly fetchFeedQueue: FetchFeedQueuePort,
   ) {}
 
-  async execute(): Promise<{ scheduled: number }> {
+  async execute(): Promise<{ scheduled: number; deduplicated: number }> {
     await this.readinessService.assertSchemaReady();
     const feeds = await this.feedsRepository.claimDueFeeds(this.appConfigService.schedulerBatchSize);
     const queuedAt = new Date().toISOString();
 
-    await Promise.all(
+    const results = await Promise.all(
       feeds.map((feed) =>
         this.fetchFeedQueue.enqueue({
           feedId: feed.id,
           queuedAt,
           attempt: 1,
+          source: 'scheduler',
         }),
       ),
     );
 
-    return { scheduled: feeds.length };
+    // A deduplicated enqueue means an earlier job for the same feed is still queued, so the
+    // claim we just took will not be released by a worker. The stuck feed sweep recovers it.
+    const deduplicated = results.filter((result) => result.deduplicated).length;
+
+    return { scheduled: feeds.length - deduplicated, deduplicated };
   }
 }
