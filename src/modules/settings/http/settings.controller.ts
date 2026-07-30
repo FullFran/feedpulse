@@ -1,12 +1,10 @@
 import { Body, Controller, Get, Put, Req } from '@nestjs/common';
-import { Request } from 'express';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-
+import { Request } from 'express';
 import { successResponse } from '../../../shared/http/response';
 import { ApiEnvelopeResponse, ApiStandardErrorResponses } from '../../../shared/http/swagger';
 import { TenantSettingsModel } from '../../../shared/http/swagger.models';
 import { resolveTenantIdFromRequest } from '../../../shared/http/tenant-context';
-
 import { GetSettingsUseCase } from '../application/get-settings.use-case';
 import { UpdateSettingsUseCase } from '../application/update-settings.use-case';
 import { UpdateSettingsDto } from '../dto/update-settings.dto';

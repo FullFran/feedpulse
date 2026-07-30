@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-
 import { AppConfigService } from '../../../shared/config/app-config.service';
-
+import { safeFetch } from '../../../shared/http/safe-fetch';
+import { resolveAllowPrivateFeedHosts } from '../../../shared/http/url-safety';
 import { AlertNotificationPayload, AlertNotifierPort, TelegramDigestPayload } from '../domain/alert-notifier.port';
 
 const EMAIL_SUBJECT_MAX_LENGTH = 120;
@@ -31,14 +31,31 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
 
     if (!url) return;
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
+    // Tenant-controlled destination, so this goes through `safeFetch`, not the
+    // global `fetch`. Validating once up front is NOT enough: `fetch` follows
+    // redirects by default, so an endpoint that passes the hostname check can
+    // answer `302 Location: http://169.254.169.254/` and the delivery lands on
+    // cloud metadata. `safeFetch` sets `redirect: 'manual'` and re-runs
+    // `assertSafePublicUrl` on every hop, which is the only form of the check
+    // that actually holds.
+    //
+    // This sink is reachable on demand: a tenant sets the destination through
+    // `PATCH /api/v1/settings` and can retrigger delivery with
+    // `POST /api/v1/alerts/:id/send`, and `last_delivery_error` is readable
+    // back through `GET /api/v1/alerts`, which would turn a blind SSRF into one
+    // with a response oracle.
+    const { response } = await safeFetch(
+      url,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ alert }),
+        signal: AbortSignal.timeout(this.appConfigService.webhookNotifierTimeoutMs),
       },
-      body: JSON.stringify({ alert }),
-      signal: AbortSignal.timeout(this.appConfigService.webhookNotifierTimeoutMs),
-    });
+      { allowPrivateHosts: resolveAllowPrivateFeedHosts(this.appConfigService) },
+    );
 
     if (!response.ok) {
       throw new Error(`webhook_delivery_failed_${response.status}`);
@@ -79,23 +96,20 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
   }
 
   async sendTelegram(alert: AlertNotificationPayload, chatId: string, telegramBotToken?: string): Promise<void> {
-    const title = this.truncate(alert.entry.title?.trim() || 'Alerta sin título', TELEGRAM_TITLE_MAX_LENGTH);
+    const title = this.truncate(alert.entry.title?.trim() || 'Untitled alert', TELEGRAM_TITLE_MAX_LENGTH);
     const snippet = this.summarizeTelegramContent(alert.entry.content);
-    const lines = [
-      '📰 Nueva alerta',
-      title,
-      snippet,
-      alert.entry.link ? `🔗 ${alert.entry.link}` : null,
-    ].filter(Boolean) as string[];
+    const lines = ['📰 New alert', title, snippet, alert.entry.link ? `🔗 ${alert.entry.link}` : null].filter(
+      Boolean,
+    ) as string[];
 
     await this.sendTelegramMessage(chatId, lines.join('\n'), telegramBotToken);
   }
 
   async sendTelegramDigest(payload: TelegramDigestPayload): Promise<void> {
-    const lines: string[] = [`📬 Resumen de alertas (${payload.items.length})`, payload.windowLabel];
+    const lines: string[] = [`📬 Alert digest (${payload.items.length})`, payload.windowLabel];
 
     payload.items.slice(0, 12).forEach((item, index) => {
-      const title = this.truncate(item.title?.trim() || 'Sin título', TELEGRAM_TITLE_MAX_LENGTH);
+      const title = this.truncate(item.title?.trim() || 'Untitled', TELEGRAM_TITLE_MAX_LENGTH);
       const snippet = this.summarizeTelegramContent(item.snippet);
       lines.push(`${index + 1}. ${title}`);
       if (snippet) {
@@ -107,7 +121,7 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     });
 
     if (payload.items.length > 12) {
-      lines.push(`…y ${payload.items.length - 12} alerta(s) más.`);
+      lines.push(`…and ${payload.items.length - 12} more alert(s).`);
     }
 
     await this.sendTelegramMessage(payload.chatId, lines.join('\n'), payload.telegramBotToken);
@@ -118,26 +132,26 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     const link = alert.entry.link ?? '-';
     const summary = this.summarizeContent(alert.entry.content);
     const includeKeywords = alert.rule.includeKeywords.join(', ') || '-';
-    const createdAt = this.formatDateEs(alert.createdAt);
+    const createdAt = this.formatDate(alert.createdAt);
 
-    const subjectBase = `Nueva alerta: ${this.truncate(title, EMAIL_TITLE_MAX_LENGTH)}`;
+    const subjectBase = `New alert: ${this.truncate(title, EMAIL_TITLE_MAX_LENGTH)}`;
     const subject = this.truncate(subjectBase, EMAIL_SUBJECT_MAX_LENGTH);
 
     const text = [
-      'Hola,',
+      'Hi,',
       '',
-      'Se detectó una noticia nueva que coincide con tu alerta.',
+      'A new article matching your alert was detected.',
       '',
-      'Resumen',
+      'Summary',
       '-------',
-      `Título: ${title}`,
-      `Entradilla: ${summary}`,
-      `Enlace: ${link}`,
-      `Regla: ${alert.rule.name}`,
-      `Palabras clave: ${includeKeywords}`,
-      `Fecha: ${createdAt}`,
+      `Title: ${title}`,
+      `Excerpt: ${summary}`,
+      `Link: ${link}`,
+      `Rule: ${alert.rule.name}`,
+      `Keywords: ${includeKeywords}`,
+      `Date: ${createdAt}`,
       '',
-      'Saludos,',
+      'Best regards,',
       'Feedpulse',
     ].join('\n');
 
@@ -150,21 +164,21 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
 
     const html = [
       '<!doctype html>',
-      '<html lang="es">',
+      '<html lang="en">',
       '<body style="font-family:Arial,sans-serif;line-height:1.5;color:#0f172a;">',
-      '<p>Hola,</p>',
-      '<p>Se detectó una noticia nueva que coincide con tu alerta.</p>',
-      '<h2 style="margin:22px 0 10px 0;font-size:18px;">Resumen</h2>',
+      '<p>Hi,</p>',
+      '<p>A new article matching your alert was detected.</p>',
+      '<h2 style="margin:22px 0 10px 0;font-size:18px;">Summary</h2>',
       `<p style="margin:0 0 8px 0;"><strong>${titleEscaped}</strong></p>`,
       `<p style="margin:0 0 14px 0;color:#334155;">${summaryEscaped}</p>`,
       link === '-'
-        ? '<p style="margin:0 0 14px 0;"><strong>Enlace:</strong> -</p>'
-        : `<p style="margin:0 0 14px 0;"><a href="${linkEscaped}" style="display:inline-block;background:#0f172a;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;">Leer noticia</a></p>`,
+        ? '<p style="margin:0 0 14px 0;"><strong>Link:</strong> -</p>'
+        : `<p style="margin:0 0 14px 0;"><a href="${linkEscaped}" style="display:inline-block;background:#0f172a;color:#fff;padding:10px 14px;border-radius:8px;text-decoration:none;">Read article</a></p>`,
       '<hr style="border:none;border-top:1px solid #e2e8f0;margin:14px 0;"/>',
-      `<p style="margin:0 0 4px 0;"><strong>Regla:</strong> ${ruleEscaped}</p>`,
-      `<p style="margin:0 0 4px 0;"><strong>Palabras clave:</strong> ${includeEscaped}</p>`,
-      `<p style="margin:0 0 4px 0;"><strong>Fecha:</strong> ${dateEscaped}</p>`,
-      '<p style="margin-top:20px;">Saludos,<br/>Feedpulse</p>',
+      `<p style="margin:0 0 4px 0;"><strong>Rule:</strong> ${ruleEscaped}</p>`,
+      `<p style="margin:0 0 4px 0;"><strong>Keywords:</strong> ${includeEscaped}</p>`,
+      `<p style="margin:0 0 4px 0;"><strong>Date:</strong> ${dateEscaped}</p>`,
+      '<p style="margin-top:20px;">Best regards,<br/>Feedpulse</p>',
       '</body>',
       '</html>',
     ].join('');
@@ -179,13 +193,13 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
     return `${value.slice(0, Math.max(0, maxLength - 1))}…`;
   }
 
-  private formatDateEs(rawDate: string): string {
+  private formatDate(rawDate: string): string {
     const date = new Date(rawDate);
     if (Number.isNaN(date.getTime())) {
       return rawDate;
     }
 
-    return `${new Intl.DateTimeFormat('es-ES', {
+    return `${new Intl.DateTimeFormat('en-GB', {
       dateStyle: 'medium',
       timeStyle: 'short',
       timeZone: 'UTC',
@@ -194,12 +208,12 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
 
   private summarizeContent(content: string | null): string {
     if (!content) {
-      return 'No hay entradilla disponible.';
+      return 'No excerpt available.';
     }
 
     const compact = content.replaceAll(/\s+/g, ' ').trim();
     if (!compact) {
-      return 'No hay entradilla disponible.';
+      return 'No excerpt available.';
     }
 
     return this.truncate(compact, EMAIL_SUMMARY_MAX_LENGTH);
@@ -257,5 +271,4 @@ export class WebhookAlertNotifier implements AlertNotifierPort {
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
   }
-
 }
