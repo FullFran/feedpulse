@@ -175,6 +175,7 @@ async function assertApiReachable(client: DemoApiClient, baseUrl: string): Promi
     throw new Error(
       `Cannot reach the FeedPulse API at ${baseUrl} (${reason}).\n` +
         'Start it first with `make dev` (host) or `make up` (Docker), or point DEMO_API_BASE_URL at a running instance.',
+      { cause: error },
     );
   }
 

@@ -112,7 +112,10 @@ describe('tooling configuration', () => {
       },
     );
 
-    it.each(['no-floating-promises', 'no-misused-promises', 'await-thenable', 'import/no-extraneous-dependencies'])(
+    // `import-x/`, not `import/`: eslint-plugin-import stopped at eslint ^9,
+    // so the rules come from the maintained eslint-plugin-import-x fork. Same
+    // rule, same guarantee, different prefix.
+    it.each(['no-floating-promises', 'no-misused-promises', 'await-thenable', 'import-x/no-extraneous-dependencies'])(
       'keeps %s enabled',
       (rule) => {
         expect(eslintConfig).toContain(rule);

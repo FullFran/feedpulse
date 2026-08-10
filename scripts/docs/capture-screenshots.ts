@@ -460,6 +460,7 @@ async function assertApiReachable(baseUrl: string): Promise<void> {
     throw new Error(
       `Cannot reach the FeedPulse API at ${baseUrl} (${error instanceof Error ? error.message : 'unknown error'}).\n` +
         'Start it with `make up` or `make dev`, then re-run this script.',
+      { cause: error },
     );
   }
 

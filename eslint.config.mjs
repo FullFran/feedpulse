@@ -1,6 +1,6 @@
 // @ts-check
 import js from '@eslint/js';
-import importPlugin from 'eslint-plugin-import';
+import importPlugin from 'eslint-plugin-import-x';
 import prettierConfig from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -46,7 +46,7 @@ export default tseslint.config(
       },
       globals: globals.node,
     },
-    plugins: { import: importPlugin },
+    plugins: { 'import-x': importPlugin },
     rules: {
       // Bug-catching rules. These are the reason type-aware linting is worth
       // its runtime cost, so they stay at `error`.
@@ -90,7 +90,7 @@ export default tseslint.config(
       // for the runtime image: `npm install --omit=dev` in the Dockerfile only
       // installs declared dependencies, so an undeclared import that resolves
       // locally through npm hoisting is a production-only crash.
-      'import/no-extraneous-dependencies': [
+      'import-x/no-extraneous-dependencies': [
         'error',
         {
           devDependencies: [
@@ -106,9 +106,9 @@ export default tseslint.config(
           peerDependencies: false,
         },
       ],
-      'import/no-duplicates': 'error',
-      'import/no-mutable-exports': 'error',
-      'import/order': [
+      'import-x/no-duplicates': 'error',
+      'import-x/no-mutable-exports': 'error',
+      'import-x/order': [
         'warn',
         {
           groups: [['builtin', 'external'], 'parent', 'sibling', 'index'],
@@ -118,7 +118,7 @@ export default tseslint.config(
       ],
       // TypeScript itself resolves modules; the plugin's resolver has no
       // knowledge of `tsconfig` and would report false positives.
-      'import/no-unresolved': 'off',
+      'import-x/no-unresolved': 'off',
 
       // General correctness rules that the codebase already satisfies.
       eqeqeq: ['error', 'smart'],
