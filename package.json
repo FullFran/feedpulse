@@ -98,7 +98,7 @@
     "@types/node": "^26.1.2",
     "@types/pg": "^8.20.4",
     "@types/supertest": "^7.2.1",
-    "eslint": "^9.39.5",
+    "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import": "^2.32.0",
     "globals": "^17.8.0",
