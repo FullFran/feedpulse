@@ -75,6 +75,33 @@ Closing that gap needs a readiness endpoint reporting consumer state.
 serve at once. Expand-and-contract; never a destructive change in the release
 that also ships the code depending on it.
 
+## How this is verified
+
+`.github/workflows/k8s.yml` runs on every change under `k8s/`:
+
+| Job | What it proves |
+|---|---|
+| **Manifest schemas** | `kubeconform -strict` over both overlays, plus the KEDA and Prometheus CRDs against the community catalogue. No `-ignore-missing-schemas`: a skipped schema is worse than no check |
+| **kind end-to-end** | Builds the image, side-loads it into a real cluster, applies the CI overlay, runs migrations, waits for all three runtimes, curls `/health` and `/ready`, restarts the worker to exercise graceful shutdown, installs KEDA and waits for the ScaledObject to report `Ready` |
+
+The ScaledObject check is the one that matters: an object the admission webhook
+accepts can still be inert. `Ready=True` means KEDA resolved the Redis trigger
+and created the underlying HPA.
+
+### Two bugs this caught that reasoning did not
+
+**The KEDA trigger address was wrong twice.** It first used
+`addressFromEnv: REDIS_ADDRESS`, but the worker exposes `REDIS_URL` — a full
+URL, not a `host:port` pair. Then it used the short name `redis:6379`, which
+failed with `server misbehaving`: the connection is opened by the **KEDA
+operator**, which runs in the `keda` namespace, and short service names only
+resolve within the caller's own namespace. It needs the FQDN.
+
+**The CI overlay disabled `ENABLE_AUTH`.** `env.schema.ts` refuses to boot with
+auth disabled under `NODE_ENV=production`, because that resolves every request
+to the shared legacy tenant. The guard was right and the overlay was wrong; CI
+now runs with the same guarantee production has.
+
 ## Not done yet
 
 - Terraform for the cluster itself ([#21](https://github.com/FullFran/feedpulse/issues/21))
