@@ -1,0 +1,166 @@
+name: Kubernetes
+
+# Proves the manifests in k8s/ actually work, rather than asserting it in a
+# README. Two jobs, deliberately separated by cost:
+#
+#   validate  — schema-checks every manifest. Seconds. Catches typos and wrong
+#               apiVersions without starting anything.
+#   e2e       — builds the image, creates a real cluster with kind, applies the
+#               CI overlay and drives it until the three runtimes are ready.
+#
+# The e2e job is what closes the gap declared in PR #25: until this exists, the
+# manifests were valid YAML that had never been applied to a cluster.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'k8s/**'
+      - 'Dockerfile'
+      - '.github/workflows/k8s.yml'
+  pull_request:
+    paths:
+      - 'k8s/**'
+      - 'Dockerfile'
+      - '.github/workflows/k8s.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Manifest schemas
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kustomize and kubeconform
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh | bash
+          sudo mv kustomize /usr/local/bin/
+          curl -sSfL -o kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xzf kubeconform.tar.gz kubeconform
+          sudo mv kubeconform /usr/local/bin/
+
+      - name: Build overlays
+        run: |
+          kustomize build k8s/base > /tmp/base.yaml
+          kustomize build k8s/overlays/ci > /tmp/ci.yaml
+          echo "--- base ---" && grep -c '^kind:' /tmp/base.yaml
+          echo "--- ci ---" && grep -c '^kind:' /tmp/ci.yaml
+
+      - name: Validate against Kubernetes schemas
+        run: |
+          kubeconform -strict -summary \
+            -kubernetes-version 1.31.0 \
+            /tmp/base.yaml /tmp/ci.yaml
+
+      # KEDA and Prometheus Operator objects are CRDs, so their schemas are not
+      # in the upstream Kubernetes catalogue. They are checked against the
+      # community CRD schema mirror instead; -ignore-missing-schemas would make
+      # this step pass by simply skipping them, which is worse than useless.
+      - name: Validate CRD-backed manifests
+        run: |
+          kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            k8s/keda k8s/monitoring
+
+  e2e:
+    name: kind end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: feedpulse
+          node_image: kindest/node:v1.31.0
+
+      - name: Build image
+        run: docker build -t feedpulse:ci .
+
+      # kind nodes have their own container runtime, so an image built on the
+      # runner is invisible to them until it is side-loaded. The manifests use
+      # imagePullPolicy: IfNotPresent, which is what makes this work without a
+      # registry.
+      - name: Load image into kind
+        run: kind load docker-image feedpulse:ci --name feedpulse
+
+      - name: Apply manifests
+        run: kubectl apply -k k8s/overlays/ci
+
+      - name: Wait for dependencies
+        run: |
+          kubectl -n feedpulse rollout status deploy/postgres --timeout=180s
+          kubectl -n feedpulse rollout status deploy/redis --timeout=120s
+
+      # Migrations must land before the API can pass readiness: /ready resolves
+      # the base schema, so it fails by design until this Job completes.
+      - name: Run migrations
+        run: |
+          kubectl -n feedpulse wait --for=condition=complete job/feedpulse-migrate --timeout=240s \
+            || { kubectl -n feedpulse logs job/feedpulse-migrate --tail=100; exit 1; }
+
+      - name: Wait for the three runtimes
+        run: |
+          kubectl -n feedpulse rollout status deploy/feedpulse-api --timeout=240s
+          kubectl -n feedpulse rollout status deploy/feedpulse-worker --timeout=240s
+          kubectl -n feedpulse rollout status deploy/feedpulse-scheduler --timeout=240s
+
+      # Asserts the probes mean what k8s/README.md claims they mean. A green
+      # rollout only proves readiness passed; this proves both endpoints answer
+      # and are distinct.
+      - name: Verify liveness and readiness
+        run: |
+          kubectl -n feedpulse port-forward svc/feedpulse-api 8080:80 &
+          sleep 5
+          curl -fsS http://127.0.0.1:8080/health && echo " <- /health OK"
+          curl -fsS http://127.0.0.1:8080/ready  && echo " <- /ready OK"
+
+      # The rollout is where graceful shutdown is exercised: every pod receives
+      # SIGTERM and must drain within terminationGracePeriodSeconds. If
+      # SHUTDOWN_TIMEOUT_MS ever exceeds the grace period, this step is what
+      # catches it.
+      - name: Restart the worker and confirm it drains and returns
+        run: |
+          kubectl -n feedpulse rollout restart deploy/feedpulse-worker
+          kubectl -n feedpulse rollout status deploy/feedpulse-worker --timeout=180s
+
+      - name: Install KEDA and apply the ScaledObject
+        run: |
+          helm repo add kedacore https://kedacore.github.io/charts
+          helm repo update
+          helm install keda kedacore/keda --namespace keda --create-namespace --wait --timeout 5m
+          kubectl -n feedpulse apply -f k8s/keda/
+
+      # A ScaledObject that the admission webhook accepts can still be inert.
+      # READY=True means KEDA resolved the Redis trigger and created the
+      # underlying HPA, which is the actual claim being made in k8s/README.md.
+      - name: Confirm KEDA took ownership of the worker
+        run: |
+          kubectl -n feedpulse wait --for=condition=Ready scaledobject/feedpulse-worker --timeout=120s \
+            || { kubectl -n feedpulse describe scaledobject feedpulse-worker; exit 1; }
+          kubectl -n feedpulse get hpa
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: |
+          kubectl -n feedpulse get pods -o wide
+          kubectl -n feedpulse get events --sort-by=.lastTimestamp | tail -40
+          kubectl -n feedpulse describe pods | tail -120
+          for d in feedpulse-api feedpulse-worker feedpulse-scheduler; do
+            echo "===== $d ====="
+            kubectl -n feedpulse logs deploy/$d --tail=80 --all-containers || true
+            kubectl -n feedpulse logs deploy/$d --tail=80 --previous || true
+          done

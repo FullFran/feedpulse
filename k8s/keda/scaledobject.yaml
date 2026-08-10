@@ -38,7 +38,10 @@ spec:
   triggers:
     - type: redis
       metadata:
-        addressFromEnv: REDIS_ADDRESS
+        # host:port, NOT a URL. `addressFromEnv` would read from the scale
+        # target's pod env, and the worker exposes REDIS_URL (a full URL), not
+        # a host:port pair -- so resolving it that way silently fails to connect.
+        address: redis:6379
         listName: bull:fetch-feed:wait
         # Target backlog per replica. 20 waiting jobs -> 1 replica; 200 -> 10.
         listLength: '20'
@@ -46,7 +49,10 @@ spec:
         name: feedpulse-redis-auth
     - type: redis
       metadata:
-        addressFromEnv: REDIS_ADDRESS
+        # host:port, NOT a URL. `addressFromEnv` would read from the scale
+        # target's pod env, and the worker exposes REDIS_URL (a full URL), not
+        # a host:port pair -- so resolving it that way silently fails to connect.
+        address: redis:6379
         listName: bull:alert-delivery:wait
         listLength: '20'
       authenticationRef:

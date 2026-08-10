@@ -1,0 +1,58 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: feedpulse
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - deps.yaml
+  - secret.yaml
+
+# Built locally and side-loaded into kind, so it must never be pulled.
+images:
+  - name: ghcr.io/fullfran/feedpulse
+    newName: feedpulse
+    newTag: ci
+
+patches:
+  # No ingress controller is installed in the CI cluster, so an Ingress object
+  # would apply cleanly and then do nothing. Removing it keeps the run honest
+  # about what is actually being exercised: #18 is not covered here.
+  - target:
+      kind: Ingress
+      name: feedpulse-api
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: feedpulse-api
+
+  # One api replica is enough to prove the manifests. Two would only slow the
+  # runner down. The PodDisruptionBudget is relaxed to match, otherwise
+  # minAvailable would equal the replica count and block eviction.
+  - target:
+      kind: Deployment
+      name: feedpulse-api
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: feedpulse-api
+    patch: |
+      - op: replace
+        path: /spec/minAvailable
+        value: 0
+
+  # Auth is exercised by the smoke suite against the Compose stack. What this
+  # job proves is that the manifests schedule, become ready and survive a
+  # rollout, so the API-key bootstrap is out of scope here.
+  - target:
+      kind: ConfigMap
+      name: feedpulse-config
+    patch: |
+      - op: replace
+        path: /data/ENABLE_AUTH
+        value: 'false'
