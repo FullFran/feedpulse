@@ -19,11 +19,19 @@ on:
       - "k8s/**"
       - "Dockerfile"
       - ".github/workflows/k8s.yml"
+      # The KEDA trigger reads BullMQ's Redis keys directly, so a queue-library
+      # bump can break autoscaling without touching a single file under k8s/.
+      - "package.json"
+      - "package-lock.json"
   pull_request:
     paths:
       - "k8s/**"
       - "Dockerfile"
       - ".github/workflows/k8s.yml"
+      # The KEDA trigger reads BullMQ's Redis keys directly, so a queue-library
+      # bump can break autoscaling without touching a single file under k8s/.
+      - "package.json"
+      - "package-lock.json"
   workflow_dispatch:
 
 concurrency:
