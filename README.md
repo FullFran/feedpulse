@@ -3,16 +3,34 @@
 [![CI](https://github.com/FullFran/feedpulse/actions/workflows/ci.yml/badge.svg)](https://github.com/FullFran/feedpulse/actions/workflows/ci.yml)
 [![Smoke](https://github.com/FullFran/feedpulse/actions/workflows/smoke.yml/badge.svg)](https://github.com/FullFran/feedpulse/actions/workflows/smoke.yml)
 [![CodeQL](https://github.com/FullFran/feedpulse/actions/workflows/codeql.yml/badge.svg)](https://github.com/FullFran/feedpulse/actions/workflows/codeql.yml)
+[![Kubernetes](https://github.com/FullFran/feedpulse/actions/workflows/k8s.yml/badge.svg)](https://github.com/FullFran/feedpulse/actions/workflows/k8s.yml)
 ![Node](https://img.shields.io/badge/node-24-3c873a)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 FeedPulse is a multi-tenant RSS/Atom monitoring service. You register feeds and keyword
 rules; it polls each feed on its own schedule, deduplicates entries, matches them against
-your rules, and delivers **one alert per article** over webhook, email and Telegram. It is
-built for the person who has to watch a few thousand sources for a handful of specific
-phrases and wants that to be a background service with an API, not a browser tab — a news
-desk, a compliance or market-intelligence team, or anyone self-hosting a monitoring stack
-on a single VPS.
+your rules, and delivers **one alert per article** over webhook, email and Telegram.
+
+## Why it exists
+
+It was built for a Hagalink project that had to monitor **more than 10,000 RSS sources**
+and alert on keyword matches across all of them.
+
+Hosted readers do not solve that problem. They are priced per seat, they are built for a
+human reading a timeline, and keyword rules with multi-channel alerting are not what they
+are for. At that source count the cost stops tracking the value, and you still do not have
+an API to plug the matches into anything else.
+
+So the requirement was specific: **10,000 feeds, on infrastructure we control, with
+alerting as a first-class output rather than a browser tab.** That number is why the
+[capacity benchmark](#performance) tops out at exactly 10,000 feeds — it is the acceptance
+criterion, not a round figure chosen to look good. It is also why the architecture looks
+the way it does: three runtimes because the API, the scheduler and the fetching have
+unrelated load profiles, and queues because ten thousand fetches do not fit inside a
+request cycle.
+
+The service was later folded into a wider platform. This repository is the standalone
+system.
 
 It is also a portfolio codebase, so it is written to be read: ports and adapters where a
 seam earns its keep, raw SQL you can review, decisions recorded in
@@ -33,6 +51,7 @@ seam earns its keep, raw SQL you can review, decisions recorded in
 - [Rules](#rules)
 - [API](#api)
 - [Performance](#performance)
+- [Deployment](#deployment)
 - [Engineering notes](#engineering-notes)
 - [Testing](#testing)
 - [Quality gates](#quality-gates)
@@ -395,6 +414,35 @@ Read those numbers honestly:
   evidence for.
 - Reproduce it yourself with `npm run benchmark:stages:mvp` and compare against your own
   hardware. See [docs/local-benchmark.md](./docs/local-benchmark.md).
+
+---
+
+## Deployment
+
+Two supported shapes, and the choice is a real one rather than a preference.
+
+**Docker Compose** (`compose.dokploy.yml`) is the simpler and, at low feed counts, the
+cheaper option. It is what the project ran on first.
+
+**Kubernetes** ([`k8s/`](./k8s/)) exists because of one property Compose cannot express:
+the worker's load is a function of **queue depth**, not of HTTP traffic. It blocks on
+network I/O against slow feeds, so CPU stays low exactly while the backlog grows — a
+CPU-based autoscaler would never fire. A [KEDA](./k8s/keda/) `ScaledObject` reads the
+BullMQ waiting list in Redis and scales the worker on the signal that actually tracks the
+work. At the 10,000-feed scale this was built for, that is the difference between a
+backlog that drains and one that does not.
+
+The manifests are not decorative. `.github/workflows/k8s.yml` schema-checks them with
+`kubeconform` and then applies them to a real cluster on every change: it builds the image,
+side-loads it into kind, runs the migration Job, waits for all three runtimes, curls
+`/health` and `/ready`, restarts the worker to exercise graceful shutdown, installs KEDA,
+and waits for the `ScaledObject` to report `Ready=True`.
+
+The honest counterpart is tracked in [#24](https://github.com/FullFran/feedpulse/issues/24):
+measuring the crossover point against a scale-to-zero PaaS and publishing the range where
+Kubernetes is the **wrong** choice.
+
+See [k8s/README.md](./k8s/README.md) for the decisions and their reasoning.
 
 ---
 
