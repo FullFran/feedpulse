@@ -4,11 +4,11 @@ metadata:
   name: feedpulse-api
   annotations:
     cert-manager.io/cluster-issuer: letsencrypt-prod
-    nginx.ingress.kubernetes.io/force-ssl-redirect: 'true'
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
     # The app also rate limits via THROTTLER (RATE_LIMIT_*). This is the outer
     # layer: it sheds load before it reaches a pod, which the in-process
     # limiter by definition cannot do.
-    nginx.ingress.kubernetes.io/limit-rps: '20'
+    nginx.ingress.kubernetes.io/limit-rps: "20"
 spec:
   ingressClassName: nginx
   tls:

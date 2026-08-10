@@ -16,14 +16,14 @@ on:
     branches:
       - main
     paths:
-      - 'k8s/**'
-      - 'Dockerfile'
-      - '.github/workflows/k8s.yml'
+      - "k8s/**"
+      - "Dockerfile"
+      - ".github/workflows/k8s.yml"
   pull_request:
     paths:
-      - 'k8s/**'
-      - 'Dockerfile'
-      - '.github/workflows/k8s.yml'
+      - "k8s/**"
+      - "Dockerfile"
+      - ".github/workflows/k8s.yml"
   workflow_dispatch:
 
 concurrency:

@@ -3,16 +3,16 @@ kind: ConfigMap
 metadata:
   name: feedpulse-config
 data:
-  NODE_ENV: 'production'
-  PORT: '3000'
-  LOG_LEVEL: 'info'
-  WORKER_METRICS_PORT: '3001'
-  WORKER_METRICS_BIND: '0.0.0.0'
+  NODE_ENV: "production"
+  PORT: "3000"
+  LOG_LEVEL: "info"
+  WORKER_METRICS_PORT: "3001"
+  WORKER_METRICS_BIND: "0.0.0.0"
   # Must stay below the pod's terminationGracePeriodSeconds, or the kubelet
   # SIGKILLs the process while it is still draining.
-  SHUTDOWN_TIMEOUT_MS: '30000'
-  SCHEDULER_TICK_MS: '15000'
-  SCHEDULER_BATCH_SIZE: '50'
-  ENABLE_AUTH: 'true'
-  ENABLE_SWAGGER: 'false'
-  ALLOW_PRIVATE_FEED_HOSTS: 'false'
+  SHUTDOWN_TIMEOUT_MS: "30000"
+  SCHEDULER_TICK_MS: "15000"
+  SCHEDULER_BATCH_SIZE: "50"
+  ENABLE_AUTH: "true"
+  ENABLE_SWAGGER: "false"
+  ALLOW_PRIVATE_FEED_HOSTS: "false"

@@ -31,7 +31,7 @@ spec:
             - containerPort: 5432
           readinessProbe:
             exec:
-              command: ['pg_isready', '-U', 'postgres', '-d', 'rss_monitor']
+              command: ["pg_isready", "-U", "postgres", "-d", "rss_monitor"]
             periodSeconds: 3
             failureThreshold: 20
           volumeMounts:
@@ -69,7 +69,7 @@ spec:
             - containerPort: 6379
           readinessProbe:
             exec:
-              command: ['redis-cli', 'ping']
+              command: ["redis-cli", "ping"]
             periodSeconds: 3
             failureThreshold: 20
 ---

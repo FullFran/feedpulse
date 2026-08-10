@@ -34,7 +34,7 @@ spec:
         - name: scheduler
           image: ghcr.io/fullfran/feedpulse:latest
           imagePullPolicy: IfNotPresent
-          args: ['node', 'dist/main/scheduler.js']
+          args: ["node", "dist/main/scheduler.js"]
           envFrom:
             - configMapRef:
                 name: feedpulse-config
@@ -50,7 +50,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
-              drop: ['ALL']
+              drop: ["ALL"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp

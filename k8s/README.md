@@ -11,12 +11,12 @@ otherwise is selling something.
 
 What Kubernetes buys here is specific and measurable:
 
-| Capability | Why Compose cannot do it |
-|---|---|
-| Scale `worker` on **queue depth** | Compose has no autoscaler, and no way to read BullMQ backlog |
-| Independent scaling per runtime | `api`, `scheduler` and `worker` have unrelated load profiles |
-| Rolling updates with automatic rollback | Compose replaces containers; it does not gate on health |
-| Declarative recovery | A node dying is rescheduling, not an incident |
+| Capability                              | Why Compose cannot do it                                     |
+| --------------------------------------- | ------------------------------------------------------------ |
+| Scale `worker` on **queue depth**       | Compose has no autoscaler, and no way to read BullMQ backlog |
+| Independent scaling per runtime         | `api`, `scheduler` and `worker` have unrelated load profiles |
+| Rolling updates with automatic rollback | Compose replaces containers; it does not gate on health      |
+| Declarative recovery                    | A node dying is rescheduling, not an incident                |
 
 The crossover point — the feed count above which this stops being overkill — is
 measured in [#24](https://github.com/FullFran/feedpulse/issues/24) using
@@ -79,10 +79,10 @@ that also ships the code depending on it.
 
 `.github/workflows/k8s.yml` runs on every change under `k8s/`:
 
-| Job | What it proves |
-|---|---|
-| **Manifest schemas** | `kubeconform -strict` over both overlays, plus the KEDA and Prometheus CRDs against the community catalogue. No `-ignore-missing-schemas`: a skipped schema is worse than no check |
-| **kind end-to-end** | Builds the image, side-loads it into a real cluster, applies the CI overlay, runs migrations, waits for all three runtimes, curls `/health` and `/ready`, restarts the worker to exercise graceful shutdown, installs KEDA and waits for the ScaledObject to report `Ready` |
+| Job                  | What it proves                                                                                                                                                                                                                                                              |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Manifest schemas** | `kubeconform -strict` over both overlays, plus the KEDA and Prometheus CRDs against the community catalogue. No `-ignore-missing-schemas`: a skipped schema is worse than no check                                                                                          |
+| **kind end-to-end**  | Builds the image, side-loads it into a real cluster, applies the CI overlay, runs migrations, waits for all three runtimes, curls `/health` and `/ready`, restarts the worker to exercise graceful shutdown, installs KEDA and waits for the ScaledObject to report `Ready` |
 
 The ScaledObject check is the one that matters: an object the admission webhook
 accepts can still be inert. `Ready=True` means KEDA resolved the Redis trigger

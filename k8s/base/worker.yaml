@@ -32,7 +32,7 @@ spec:
         - name: worker
           image: ghcr.io/fullfran/feedpulse:latest
           imagePullPolicy: IfNotPresent
-          args: ['node', 'dist/main/worker.js']
+          args: ["node", "dist/main/worker.js"]
           ports:
             - name: metrics
               containerPort: 3001
@@ -71,7 +71,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
-              drop: ['ALL']
+              drop: ["ALL"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp

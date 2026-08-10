@@ -36,7 +36,7 @@ spec:
         - name: api
           image: ghcr.io/fullfran/feedpulse:latest
           imagePullPolicy: IfNotPresent
-          args: ['node', 'dist/main/api.js']
+          args: ["node", "dist/main/api.js"]
           ports:
             - name: http
               containerPort: 3000
@@ -85,7 +85,7 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
-              drop: ['ALL']
+              drop: ["ALL"]
           volumeMounts:
             - name: tmp
               mountPath: /tmp

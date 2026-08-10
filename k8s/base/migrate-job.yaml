@@ -23,7 +23,7 @@ spec:
       containers:
         - name: migrate
           image: ghcr.io/fullfran/feedpulse:latest
-          args: ['node', 'dist/scripts/migrate.js']
+          args: ["node", "dist/scripts/migrate.js"]
           envFrom:
             - configMapRef:
                 name: feedpulse-config
@@ -39,4 +39,4 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
-              drop: ['ALL']
+              drop: ["ALL"]
