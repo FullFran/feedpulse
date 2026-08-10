@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feedpulse-api
+  labels:
+    app.kubernetes.io/name: feedpulse
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: feedpulse
+      app.kubernetes.io/component: api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: feedpulse
+        app.kubernetes.io/component: api
+    spec:
+      # The image runs as uid 1000 and owns nothing it can rewrite; see the
+      # comments in Dockerfile. These settings assert that at admission time
+      # instead of trusting the image to have got it right.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: api
+          image: ghcr.io/fullfran/feedpulse:latest
+          imagePullPolicy: IfNotPresent
+          args: ['node', 'dist/main/api.js']
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: feedpulse-config
+            - secretRef:
+                name: feedpulse-secrets
+          # Liveness asks one question only: is this process wedged? It must not
+          # touch Postgres or Redis. A dependency outage that fails liveness
+          # restarts every pod against the same broken dependency, which turns a
+          # database blip into a CrashLoopBackOff across the whole Deployment.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # Readiness asks the opposite question: can this replica serve right
+          # now? /ready resolves the base schema through search_path, so it fails
+          # while Postgres is unreachable and the pod is pulled out of the
+          # Service endpoints without being killed.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 2
+          # Slow first boot must not be mistaken for a wedged process. Until the
+          # startup probe passes, liveness is not evaluated at all.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 3
+            failureThreshold: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feedpulse-api
+  labels:
+    app.kubernetes.io/name: feedpulse
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: feedpulse
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: feedpulse-api
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: feedpulse
+      app.kubernetes.io/component: api

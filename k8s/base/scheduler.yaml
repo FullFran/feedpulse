@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feedpulse-scheduler
+  labels:
+    app.kubernetes.io/name: feedpulse
+    app.kubernetes.io/component: scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: feedpulse
+      app.kubernetes.io/component: scheduler
+  # Recreate, not RollingUpdate. Two schedulers alive at once would both tick.
+  # Enqueue is deduplicated by job id (`feed-<id>`, see FetchFeedJobData), so a
+  # brief overlap is survivable rather than corrupting -- but a visible gap is
+  # cheaper to reason about than a silent double tick.
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: feedpulse
+        app.kubernetes.io/component: scheduler
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: scheduler
+          image: ghcr.io/fullfran/feedpulse:latest
+          imagePullPolicy: IfNotPresent
+          args: ['node', 'dist/main/scheduler.js']
+          envFrom:
+            - configMapRef:
+                name: feedpulse-config
+            - secretRef:
+                name: feedpulse-secrets
+          resources:
+            requests:
+              cpu: 50m
+              memory: 192Mi
+            limits:
+              memory: 384Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

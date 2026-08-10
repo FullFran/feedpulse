@@ -1,0 +1,44 @@
+# prom-client is already a dependency and every runtime exposes metrics: the api
+# on /metrics (which also aggregates the worker's), and the worker on its own
+# port via src/main/worker-metrics-server.ts.
+#
+# /metrics is bearer-protected when METRICS_AUTH_TOKEN is set, so the scrape
+# config has to carry it. Leaving it unset to make scraping "just work" would
+# publish per-tenant operational data to anything that can reach the pod.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: feedpulse-api
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: feedpulse
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      authorization:
+        type: Bearer
+        credentials:
+          name: feedpulse-secrets
+          key: METRICS_AUTH_TOKEN
+---
+# The worker has no Service, so it is scraped by pod rather than by service.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: feedpulse-worker
+  labels:
+    release: kube-prometheus-stack
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: feedpulse
+      app.kubernetes.io/component: worker
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

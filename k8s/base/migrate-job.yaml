@@ -1,0 +1,42 @@
+# Runs db/migrations before a new version serves traffic.
+#
+# Ordering is the part that matters: this Job must complete before the api
+# rollout starts, and migrations must be backward compatible with the version
+# still running, because during a RollingUpdate both versions are live at once.
+# Expand-and-contract, never a destructive change in the same release.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: feedpulse-migrate
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ghcr.io/fullfran/feedpulse:latest
+          args: ['node', 'dist/scripts/migrate.js']
+          envFrom:
+            - configMapRef:
+                name: feedpulse-config
+            - secretRef:
+                name: feedpulse-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
