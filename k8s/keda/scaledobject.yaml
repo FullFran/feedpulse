@@ -1,0 +1,81 @@
+# The reason Kubernetes earns its place in this project.
+#
+# Worker load is a function of queue depth, not of HTTP traffic. A CPU-based
+# HPA is the WRONG signal here: the worker spends most of its time blocked on
+# network I/O against slow feeds, so CPU stays low exactly while the backlog
+# grows. Scaling on CPU would leave the queue draining at one replica.
+#
+# BullMQ stores waiting jobs in a Redis list keyed `bull:<queue>:wait`, which is
+# what the redis scaler below measures.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: feedpulse-worker
+spec:
+  scaleTargetRef:
+    name: feedpulse-worker
+  # Scale to zero is deliberately NOT used: minReplicaCount 1 keeps one consumer
+  # warm so a single feed arriving does not wait a full polling interval plus a
+  # cold start. Set it to 0 only after measuring that the added latency is
+  # acceptable -- and record the number.
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  pollingInterval: 15
+  # Must exceed the longest job. Scaling in mid-job relies on graceful shutdown
+  # to drain, and draining costs the pod's terminationGracePeriodSeconds.
+  cooldownPeriod: 120
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # Feed bursts are spiky. Without this, replicas oscillate: scale up on
+          # a burst, scale straight back down into the next one.
+          stabilizationWindowSeconds: 300
+          policies:
+            - type: Percent
+              value: 50
+              periodSeconds: 60
+  triggers:
+    - type: redis
+      metadata:
+        # Two traps in one line, both found by CI rather than by reasoning:
+        #
+        # 1. host:port, NOT a URL. `addressFromEnv` would read from the scale
+        #    target's pod env, and the worker exposes REDIS_URL (a full URL),
+        #    not a host:port pair, so it would never connect.
+        # 2. Fully qualified, NOT the short name. The connection is opened by
+        #    the KEDA operator, which runs in the `keda` namespace -- short
+        #    names only resolve within the caller's own namespace. `redis:6379`
+        #    fails with "server misbehaving" from there.
+        address: redis.feedpulse.svc.cluster.local:6379
+        listName: bull:fetch-feed:wait
+        # Target backlog per replica. 20 waiting jobs -> 1 replica; 200 -> 10.
+        listLength: "20"
+      authenticationRef:
+        name: feedpulse-redis-auth
+    - type: redis
+      metadata:
+        # Two traps in one line, both found by CI rather than by reasoning:
+        #
+        # 1. host:port, NOT a URL. `addressFromEnv` would read from the scale
+        #    target's pod env, and the worker exposes REDIS_URL (a full URL),
+        #    not a host:port pair, so it would never connect.
+        # 2. Fully qualified, NOT the short name. The connection is opened by
+        #    the KEDA operator, which runs in the `keda` namespace -- short
+        #    names only resolve within the caller's own namespace. `redis:6379`
+        #    fails with "server misbehaving" from there.
+        address: redis.feedpulse.svc.cluster.local:6379
+        listName: bull:alert-delivery:wait
+        listLength: "20"
+      authenticationRef:
+        name: feedpulse-redis-auth
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: feedpulse-redis-auth
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: feedpulse-secrets
+      key: REDIS_PASSWORD

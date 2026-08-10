@@ -1,0 +1,63 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: feedpulse
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - deps.yaml
+  - secret.yaml
+
+# Built locally and side-loaded into kind, so it must never be pulled.
+images:
+  - name: ghcr.io/fullfran/feedpulse
+    newName: feedpulse
+    newTag: ci
+
+patches:
+  # No ingress controller is installed in the CI cluster, so an Ingress object
+  # would apply cleanly and then do nothing. Removing it keeps the run honest
+  # about what is actually being exercised: #18 is not covered here.
+  - target:
+      kind: Ingress
+      name: feedpulse-api
+    patch: |
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: feedpulse-api
+
+  # One api replica is enough to prove the manifests. Two would only slow the
+  # runner down. The PodDisruptionBudget is relaxed to match, otherwise
+  # minAvailable would equal the replica count and block eviction.
+  - target:
+      kind: Deployment
+      name: feedpulse-api
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+  - target:
+      kind: PodDisruptionBudget
+      name: feedpulse-api
+    patch: |
+      - op: replace
+        path: /spec/minAvailable
+        value: 0
+
+  # AUTH_PROVIDER defaults to `clerk_api_key`, which would need real Clerk
+  # credentials. `api_key` verifies against the local api_keys table instead,
+  # which the migration seeds from BOOTSTRAP_API_KEY.
+  #
+  # ENABLE_AUTH is deliberately NOT patched to false: env.schema.ts refuses to
+  # boot with auth disabled under NODE_ENV=production, and that guard exists for
+  # a good reason -- disabling auth resolves every request to the shared legacy
+  # tenant. CI runs with the same guarantee production has.
+  - target:
+      kind: ConfigMap
+      name: feedpulse-config
+    patch: |
+      - op: add
+        path: /data/AUTH_PROVIDER
+        value: 'api_key'
