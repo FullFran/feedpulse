@@ -96,7 +96,7 @@
     "@types/express": "^5.0.3",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.1.2",
-    "@types/pg": "^8.20.0",
+    "@types/pg": "^8.20.4",
     "@types/supertest": "^7.2.1",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
