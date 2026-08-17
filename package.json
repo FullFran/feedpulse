@@ -101,7 +101,7 @@
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-import-x": "^4.17.1",
-    "globals": "^17.8.0",
+    "globals": "^17.11.0",
     "jest": "^30.4.2",
     "pg-mem": "^3.0.5",
     "prettier": "^3.9.6",
